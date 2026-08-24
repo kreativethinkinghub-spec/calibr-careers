@@ -1,0 +1,5 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="100" cy="100" r="88" fill="none" stroke="currentColor" stroke-width="7"/>
+  <text x="100" y="92" text-anchor="middle" dominant-baseline="central" fill="currentColor" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-weight="800" font-size="62" letter-spacing="-2">KTH</text>
+  <text x="100" y="132" text-anchor="middle" dominant-baseline="central" fill="currentColor" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-weight="600" font-size="24" letter-spacing="8">TECH</text>
+</svg>

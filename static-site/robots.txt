@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Disallow: /js/
+Disallow: /candidate-profile.html
+Disallow: /dashboard.html
+Disallow: /calibr-score.html
+Disallow: /referral.html
+Disallow: /partner-portal.html
+Disallow: /admin.html
+
+Sitemap: https://calibr-careers.tech/sitemap.xml

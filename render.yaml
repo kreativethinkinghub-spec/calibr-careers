@@ -1,0 +1,43 @@
+# CALIBR — one service on Render (repo root = this CALIBR folder).
+# The app IS the site: it serves the landing at "/", then signup/login/jobs/dashboards.
+# Deploy: Render → New → Blueprint → pick the repo. Point calibr-careers.tech + www at this service.
+services:
+  # ---------- The app: landing (/) + login, assessments, jobs, billing ----------
+  - type: web
+    name: calibr-app
+    runtime: node
+    plan: starter            # persistent disks need a paid instance type
+    region: frankfurt        # closest Render region to South Africa
+    rootDir: app
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true
+    disk:
+      name: calibr-data
+      mountPath: /data        # SQLite DB lives here → survives deploys/restarts
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "24"           # node:sqlite works flag-free on Node 24
+      - key: NODE_ENV
+        value: production
+      - key: DB_PATH
+        value: /data/calibr.db
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_EMAILS
+        value: kreativethinkinghub@gmail.com
+      # --- set these in the Render dashboard (Environment tab); never commit them ---
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+      - key: LINKEDIN_CLIENT_ID
+        sync: false
+      - key: LINKEDIN_CLIENT_SECRET
+        sync: false
+# The separate static marketing site has been retired — the app serves the landing itself.
+# (static-site/ remains in the repo for reference / optional SEO pages, but is no longer deployed.)

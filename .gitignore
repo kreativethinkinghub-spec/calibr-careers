@@ -1,0 +1,11 @@
+﻿node_modules/
+**/node_modules/
+.env
+**/.env
+!**/.env.example
+app/db/
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
+*.log
