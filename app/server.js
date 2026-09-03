@@ -20,6 +20,7 @@ const notify = require('./notify');
 const SqliteStore = require('./store');
 let hiring = null; // employer hiring toolkit (scorecards, scheduling, analytics) — registered before listen
 let collab = null; // careers page + candidate comments — registered before listen
+let webhooks = null; // public API + outbound webhooks — registered before listen
 
 const app = express();
 const PROD = process.env.NODE_ENV === 'production';
@@ -668,6 +669,7 @@ app.post('/jobs/:token/apply', async (req, res) => {
   if (ex) db.run('UPDATE applications SET jd_match=?, jd_report=?, cv_text=?, fit=?, source=? WHERE id=?', scored.match, report, cv, fit, 'public', ex.id);
   else db.run('INSERT INTO applications (role_id,user_id,stage,fit,jd_match,jd_report,cv_text,source,created_at) VALUES (?,?,?,?,?,?,?,?,?)', role.id, u.id, 'New', fit, scored.match, report, cv, 'public', now());
   if (phone) { const co = db.get('SELECT name FROM companies WHERE id=?', role.company_id) || {}; notify.fire(phone, notify.T.applied(name, role.title, co.name || 'the company')); }
+  if (webhooks) webhooks.fireWebhook(role.company_id, 'application.created', { role_id: role.id, role_title: role.title, candidate: name, email, jd_match: scored.match, fit, source: 'public' });
   res.send(shell({ title: 'Applied', user: user(req), body: `
     <div style="text-align:center;padding:40px 0">
       <h1>Application received<em>.</em></h1>
@@ -750,6 +752,7 @@ app.get('/company', requireAuth, requireRole('employer'), (req, res) => {
       <div class="card"><h3>Reports</h3><p>B-BBEE &amp; EE reporting</p><a class="btn sm g" href="/company/reports">View reports</a></div>
       <div class="card"><h3>Culture profile</h3><p>${cultureSet ? 'Defined — scoring is company-relative' : 'Define what your company values'}</p><a class="btn sm ${cultureSet ? 'g' : ''}" href="/company/culture">${cultureSet ? 'Edit profile' : 'Set up profile'}</a></div>
       <div class="card"><h3>Connections</h3><p>${connCount ? connCount + ' of ' + distribute.PARTNERS.length + ' job platforms connected' : 'Connect the job boards you use'}</p><a class="btn sm ${connCount ? 'g' : ''}" href="/company/connections">Manage connections</a></div>
+      <div class="card"><h3>API &amp; webhooks</h3><p>Integrate CALIBR with your HRIS &amp; tools</p><a class="btn sm g" href="/company/api">Manage API</a></div>
       <div class="card"><h3>Billing</h3><p>Flat monthly subscription — from R1,499/mo</p><a class="btn sm g" href="/company/billing">View plans</a></div>
     </div>
     <div class="lbl">Open roles</div>
@@ -1082,7 +1085,21 @@ app.get('/company/reports', requireAuth, requireRole('employer'), (req, res) => 
     <div class="price-strip"><div><div class="p">${hired.length}</div><div class="l">Hires via CALIBR</div></div></div>
     <div class="lbl">Hires by race (EE)</div>${tbl(byRace)}
     <div class="lbl">Hires by gender (EE)</div>${tbl(byGender)}
-    <p class="sub" style="font-size:12px">EE self-identification is optional and POPIA-protected. Candidates who did not disclose appear as "Not disclosed".</p>` }));
+    <div class="actions"><a class="btn sm" href="/company/reports/ee.csv">Download EE report (CSV)</a></div>
+    <p class="sub" style="font-size:12px">EE self-identification is optional and POPIA-protected. Candidates who did not disclose appear as "Not disclosed". The CSV gives a race × gender matrix of applicants and hires for your EEA2 / EEA4 workings.</p>` }));
+});
+// EE / B-BBEE workforce export (race × gender matrix of applicants & hires) — CSV
+app.get('/company/reports/ee.csv', requireAuth, requireRole('employer'), (req, res) => {
+  const rows = db.all(`SELECT u.ee_race, u.ee_gender, a.stage FROM applications a JOIN roles_posted r ON r.id=a.role_id JOIN users u ON u.id=a.user_id WHERE r.company_id=?`, req.user.company_id);
+  const ADV = new Set(['Shortlist', 'Interview', 'Offer', 'Hired']);
+  const g = {};
+  rows.forEach(r => { const race = r.ee_race || 'Not disclosed', gender = r.ee_gender || 'Not disclosed'; const k = race + '||' + gender; (g[k] = g[k] || { race, gender, applicants: 0, advanced: 0, hired: 0 }); g[k].applicants++; if (ADV.has(r.stage)) g[k].advanced++; if (r.stage === 'Hired') g[k].hired++; });
+  const q = s => /[",\n]/.test(String(s)) ? '"' + String(s).replace(/"/g, '""') + '"' : String(s);
+  const lines = ['Race,Gender,Applicants,Advanced,Hired'];
+  Object.values(g).sort((a, b) => b.applicants - a.applicants).forEach(x => lines.push([x.race, x.gender, x.applicants, x.advanced, x.hired].map(q).join(',')));
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="calibr-ee-report.csv"');
+  res.send(lines.join('\r\n'));
 });
 
 app.get('/company/pool', requireAuth, requireRole('employer'), (req, res) => {
@@ -1313,4 +1330,5 @@ const PORT = process.env.PORT || 4000;
 hiring = require('./hiring')({ app, db, shell, esc, now, requireAuth, requireRole, STAGES, notify });
 require('./intelligence')({ app, db, shell, esc, now, requireAuth, requireRole, ai: require('./ai') });
 collab = require('./collab')({ app, db, shell, esc, now, requireAuth, requireRole });
+webhooks = require('./publicapi')({ app, db, shell, esc, now, requireAuth, requireRole });
 app.listen(PORT, () => console.log('CALIBR app running on http://localhost:' + PORT));
