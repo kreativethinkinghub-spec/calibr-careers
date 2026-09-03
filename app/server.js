@@ -605,7 +605,7 @@ app.get('/jobs', (req, res) => {
   const roles = db.all(`SELECT r.*, c.name company FROM roles_posted r JOIN companies c ON c.id=r.company_id WHERE r.is_public=1 AND r.public_token IS NOT NULL AND r.status='open' ORDER BY r.id DESC`);
   res.send(shell({ title: 'Jobs', user: user(req), body: `
     <h1>Open roles<em>.</em></h1><p class="sub">Apply once — your CV is scored against the job instantly, and your CALIBR Score travels with it.</p>
-    ${roles.length ? `<div class="grid">${roles.map(r => `<div class="card"><h3 style="margin:0">${esc(r.title)}</h3><p>${esc(r.company)}${r.location ? ' · ' + esc(r.location) : ''}${r.emp_type ? ' · ' + esc(r.emp_type) : ''}</p>${(r.salary_min || r.salary_max) ? `<p class="sub" style="margin:0">R${Number(r.salary_min || r.salary_max).toLocaleString()}${r.salary_max && r.salary_min ? '–R' + Number(r.salary_max).toLocaleString() : ''}/yr</p>` : ''}<a class="btn sm" href="/jobs/${r.public_token}">View &amp; apply</a></div>`).join('')}</div>` : '<p class="sub">No open roles right now.</p>'}` }));
+    ${roles.length ? `<div class="grid">${roles.map(r => `<div class="card"><h3 style="margin:0">${esc(r.title)}</h3><p>${esc(r.company)}${r.location ? ' · ' + esc(r.location) : ''}${r.emp_type ? ' · ' + esc(r.emp_type) : ''}</p>${(r.salary_min || r.salary_max) ? `<p class="sub" style="margin:0">R${Number(r.salary_min || r.salary_max).toLocaleString('en-US')}${r.salary_max && r.salary_min ? '–R' + Number(r.salary_max).toLocaleString('en-US') : ''}/yr</p>` : ''}<a class="btn sm" href="/jobs/${r.public_token}">View &amp; apply</a></div>`).join('')}</div>` : '<p class="sub">No open roles right now.</p>'}` }));
 });
 
 app.get('/jobs/:token', (req, res) => {
@@ -617,7 +617,7 @@ app.get('/jobs/:token', (req, res) => {
   const isSaved = isSeeker && db.get('SELECT 1 s FROM saved_jobs WHERE user_id=? AND role_id=?', me.id, role.id);
   res.send(shell({ title: role.title + ' · ' + role.company, user: me, head: jsonld, body: `
     <h1>${esc(role.title)}<em>.</em></h1>
-    <p class="sub">${esc(role.company)}${role.location ? ' · ' + esc(role.location) : ''}${role.emp_type ? ' · ' + esc(role.emp_type) : ''}${(role.salary_min || role.salary_max) ? ' · R' + Number(role.salary_min || role.salary_max).toLocaleString() + (role.salary_max && role.salary_min ? '–R' + Number(role.salary_max).toLocaleString() : '') + '/yr' : ''}</p>
+    <p class="sub">${esc(role.company)}${role.location ? ' · ' + esc(role.location) : ''}${role.emp_type ? ' · ' + esc(role.emp_type) : ''}${(role.salary_min || role.salary_max) ? ' · R' + Number(role.salary_min || role.salary_max).toLocaleString('en-US') + (role.salary_max && role.salary_min ? '–R' + Number(role.salary_max).toLocaleString('en-US') : '') + '/yr' : ''}</p>
     <div class="actions"><a class="btn" href="/jobs/${role.public_token}/apply">Apply now</a>${isSeeker ? (isSaved ? '<span class="pill done" style="align-self:center">Saved</span>' : `<form method="post" action="/jobs/${role.public_token}/save" style="display:inline"><button class="btn g">Save job</button></form>`) : ''}</div>
     <div class="lbl">About the role</div>
     <div class="q" style="white-space:pre-wrap;font-size:14px;line-height:1.65">${esc(role.description || 'No description provided.')}</div>
@@ -716,7 +716,7 @@ app.get('/company', requireAuth, requireRole('employer'), (req, res) => {
       <div class="card"><h3>Billing</h3><p>Flat monthly subscription — from R1,499/mo</p><a class="btn sm g" href="/company/billing">View plans</a></div>
     </div>
     <div class="lbl">Open roles</div>
-    ${roles.length ? `<div class="table-wrap"><table><tr><th>Role</th><th>Salary</th><th>Applicants</th><th>Posted</th><th></th></tr>${roles.map(r => { const na = db.get('SELECT COUNT(*) n FROM applications WHERE role_id=? AND source=?', r.id, 'public').n; return `<tr><td><b>${esc(r.title)}</b>${r.public_token ? '' : ' <span class="pill todo">draft</span>'}</td><td>${r.salary ? 'R' + Number(r.salary).toLocaleString() : '—'}</td><td>${na}</td><td>${esc(r.created_at.slice(0,10))}</td><td><a class="btn sm" href="/company/role/${r.id}">Screen</a> <a class="btn sm g" href="/company/role/${r.id}/distribute">Distribute</a></td></tr>`; }).join('')}</table></div>` : '<p class="sub">No roles yet — post one above.</p>'}` }));
+    ${roles.length ? `<div class="table-wrap"><table><tr><th>Role</th><th>Salary</th><th>Applicants</th><th>Posted</th><th></th></tr>${roles.map(r => { const na = db.get('SELECT COUNT(*) n FROM applications WHERE role_id=? AND source=?', r.id, 'public').n; return `<tr><td><b>${esc(r.title)}</b>${r.public_token ? '' : ' <span class="pill todo">draft</span>'}</td><td>${r.salary ? 'R' + Number(r.salary).toLocaleString('en-US') : '—'}</td><td>${na}</td><td>${esc(r.created_at.slice(0,10))}</td><td><a class="btn sm" href="/company/role/${r.id}">Screen</a> <a class="btn sm g" href="/company/role/${r.id}/distribute">Distribute</a></td></tr>`; }).join('')}</table></div>` : '<p class="sub">No roles yet — post one above.</p>'}` }));
 });
 
 // Full job-posting form (JD, location, type, salary band)
@@ -919,7 +919,7 @@ app.get('/company/role/:id', requireAuth, requireRole('employer'), (req, res) =>
   const w = JSON.parse(role.weights || '{}');
   res.send(shell({ title: 'Screen: ' + role.title, user: req.user, body: `
     <h1>Screen · ${esc(role.title)}<em>.</em></h1>
-    <p class="sub">${role.salary ? 'R' + Number(role.salary).toLocaleString() + '/yr · ' : ''}Every scored candidate ranked by fit to this role. <a href="/company/role/${role.id}/pipeline" style="color:var(--pink);font-weight:700">View pipeline &rarr;</a></p>
+    <p class="sub">${role.salary ? 'R' + Number(role.salary).toLocaleString('en-US') + '/yr · ' : ''}Every scored candidate ranked by fit to this role. <a href="/company/role/${role.id}/pipeline" style="color:var(--pink);font-weight:700">View pipeline &rarr;</a></p>
     <div class="actions"><a class="btn sm" href="/company/role/${role.id}/bulk">Bulk CV upload</a> <a class="btn sm g" href="/company/role/${role.id}/distribute">Distribute</a> <a class="btn sm g" href="/company/role/${role.id}/scorecard">Scorecard</a></div>
     <div class="lbl">Rubric weights (per axis)</div>
     <form method="post" action="/company/role/${role.id}/weights" class="fld inline">
@@ -1121,7 +1121,7 @@ app.get('/company/billing', requireAuth, requireRole('employer'), (req, res) => 
   const curKey = co.plan || null;
   const cur = curKey && paystack.EMPLOYER_PLANS[curKey] ? paystack.EMPLOYER_PLANS[curKey].name : null;
   const cards = Object.entries(paystack.EMPLOYER_PLANS).map(([key, p]) => {
-    const price = p.custom ? 'Custom' : 'R' + p.amount.toLocaleString() + '<span style="font-size:14px">/mo</span>';
+    const price = p.custom ? 'Custom' : 'R' + p.amount.toLocaleString('en-US') + '<span style="font-size:14px">/mo</span>';
     const action = p.custom
       ? '<a class="btn sm block g" href="https://calibr-careers.tech/pricing.html" target="_blank">Talk to us</a>'
       : (curKey === key ? '<span class="pill done">Current plan</span>' : `<form method="post" action="/company/billing/subscribe/${key}"><button class="btn sm block"${paystack.hasKeys() ? '' : ' disabled'}>Choose ${esc(p.name)}</button></form>`);
@@ -1195,8 +1195,8 @@ app.get('/partner', requireAuth, requireRole('partner'), (req, res) => {
     <div class="grid">
       <div class="card"><h3>Referred companies</h3><div class="score-num" style="font-size:40px">${s.cos.length}</div></div>
       <div class="card"><h3>Active subscriptions</h3><div class="score-num" style="font-size:40px">${s.active}</div></div>
-      <div class="card"><h3>Commission earned</h3><div class="score-num" style="font-size:40px">R${s.commissionEarned.toLocaleString()}</div><p>from paid subscriptions</p></div>
-      <div class="card"><h3>Pending commission</h3><div class="score-num" style="font-size:40px">R${s.commissionPending.toLocaleString()}</div><p>as invoices clear</p></div>
+      <div class="card"><h3>Commission earned</h3><div class="score-num" style="font-size:40px">R${s.commissionEarned.toLocaleString('en-US')}</div><p>from paid subscriptions</p></div>
+      <div class="card"><h3>Pending commission</h3><div class="score-num" style="font-size:40px">R${s.commissionPending.toLocaleString('en-US')}</div><p>as invoices clear</p></div>
     </div>
     <div class="lbl">Your referral link</div>
     <div class="q"><b>${esc(link)}</b><p class="sub" style="margin-top:6px">Code: <b>${esc(req.user.referral_code)}</b> · share this; any employer who signs up through it is attributed to you.</p></div>
@@ -1206,7 +1206,7 @@ app.get('/partner/referrals', requireAuth, requireRole('partner'), (req, res) =>
   const s = partnerStats(req.user.id);
   res.send(shell({ title: 'Referrals', user: req.user, body: `
     <h1>Referrals<em>.</em></h1><p class="sub"><a href="/partner" style="color:var(--pink);font-weight:700">&larr; Dashboard</a></p>
-    ${s.cos.length ? `<div class="table-wrap"><table><tr><th>Company</th><th>Signed up</th><th>Plan</th><th>Your commission earned</th></tr>${s.cos.map(c => { const paid = db.all("SELECT amount FROM payments WHERE kind='subscription' AND status='paid' AND company_id=?", c.id).reduce((t, p) => t + p.amount, 0); const planName = c.plan && paystack.EMPLOYER_PLANS[c.plan] ? paystack.EMPLOYER_PLANS[c.plan].name : '—'; return `<tr><td><b>${esc(c.name)}</b></td><td>${esc((c.created_at || '').slice(0, 10))}</td><td>${esc(planName)}</td><td>R${Math.round(paid * PARTNER_SHARE).toLocaleString()}</td></tr>`; }).join('')}</table></div>` : '<p class="sub">No referrals yet — share your link from the dashboard.</p>'}` }));
+    ${s.cos.length ? `<div class="table-wrap"><table><tr><th>Company</th><th>Signed up</th><th>Plan</th><th>Your commission earned</th></tr>${s.cos.map(c => { const paid = db.all("SELECT amount FROM payments WHERE kind='subscription' AND status='paid' AND company_id=?", c.id).reduce((t, p) => t + p.amount, 0); const planName = c.plan && paystack.EMPLOYER_PLANS[c.plan] ? paystack.EMPLOYER_PLANS[c.plan].name : '—'; return `<tr><td><b>${esc(c.name)}</b></td><td>${esc((c.created_at || '').slice(0, 10))}</td><td>${esc(planName)}</td><td>R${Math.round(paid * PARTNER_SHARE).toLocaleString('en-US')}</td></tr>`; }).join('')}</table></div>` : '<p class="sub">No referrals yet — share your link from the dashboard.</p>'}` }));
 });
 app.get('/partner/materials', requireAuth, requireRole('partner'), (req, res) => {
   res.send(shell({ title: 'Materials', user: req.user, body: `
@@ -1222,7 +1222,7 @@ app.get('/partner/billing', requireAuth, requireRole('partner'), (req, res) => {
   const s = partnerStats(req.user.id);
   res.send(shell({ title: 'Payouts', user: req.user, body: `
     <h1>Payouts<em>.</em></h1><p class="sub"><a href="/partner" style="color:var(--pink);font-weight:700">&larr; Dashboard</a> · Commission is ${Math.round(PARTNER_SHARE * 100)}% of the monthly subscription from your referred clients, recurring while they stay.</p>
-    <div class="price-strip"><div><div class="p">R${s.commissionEarned.toLocaleString()}</div><div class="l">Earned (client-settled)</div></div><div><div class="p">R${s.commissionPending.toLocaleString()}</div><div class="l">Pending</div></div></div>
+    <div class="price-strip"><div><div class="p">R${s.commissionEarned.toLocaleString('en-US')}</div><div class="l">Earned (client-settled)</div></div><div><div class="p">R${s.commissionPending.toLocaleString('en-US')}</div><div class="l">Pending</div></div></div>
     <p class="sub" style="font-size:12px">Payouts are settled by CALIBR to your nominated account. Add banking details during partner onboarding.</p>` }));
 });
 
@@ -1243,10 +1243,10 @@ app.get('/admin', requireAuth, requireRole('admin'), (req, res) => {
       <div class="card"><h3>${c.a}</h3><p>Assessments</p></div>
     </div>
     <div class="lbl">Revenue (subscriptions)</div>
-    <div class="price-strip"><div><div class="p">R${Number(subPaid).toLocaleString()}</div><div class="l">Collected</div></div><div><div class="p">R${Number(subPending).toLocaleString()}</div><div class="l">Pending</div></div></div>
+    <div class="price-strip"><div><div class="p">R${Number(subPaid).toLocaleString('en-US')}</div><div class="l">Collected</div></div><div><div class="p">R${Number(subPending).toLocaleString('en-US')}</div><div class="l">Pending</div></div></div>
     <div class="actions"><a class="btn sm" href="/admin/users">Users</a> <a class="btn sm" href="/admin/companies">Companies</a> <a class="btn sm" href="/admin/partners">Partners</a> <a class="btn sm g" href="/admin/payments">Payments</a></div>
     <div class="lbl">Recent payments</div>
-    ${pays.length ? `<div class="table-wrap"><table><tr><th>Ref</th><th>Kind</th><th>Amount</th><th>Status</th><th>Date</th></tr>${pays.map(p => `<tr><td>${esc(p.reference)}</td><td>${esc(p.kind)}${p.plan ? ' · ' + esc(p.plan) : ''}</td><td>R${Number(p.amount).toLocaleString()}</td><td><span class="pill ${p.status === 'paid' ? 'done' : 'todo'}">${esc(p.status)}</span></td><td>${esc((p.created_at || '').slice(0, 10))}</td></tr>`).join('')}</table></div>` : '<p class="sub">No payments yet.</p>'}` }));
+    ${pays.length ? `<div class="table-wrap"><table><tr><th>Ref</th><th>Kind</th><th>Amount</th><th>Status</th><th>Date</th></tr>${pays.map(p => `<tr><td>${esc(p.reference)}</td><td>${esc(p.kind)}${p.plan ? ' · ' + esc(p.plan) : ''}</td><td>R${Number(p.amount).toLocaleString('en-US')}</td><td><span class="pill ${p.status === 'paid' ? 'done' : 'todo'}">${esc(p.status)}</span></td><td>${esc((p.created_at || '').slice(0, 10))}</td></tr>`).join('')}</table></div>` : '<p class="sub">No payments yet.</p>'}` }));
 });
 app.get('/admin/users', requireAuth, requireRole('admin'), (req, res) => {
   const rows = db.all('SELECT id, role, name, email, plan, created_at FROM users ORDER BY id DESC LIMIT 300');
@@ -1261,12 +1261,12 @@ app.get('/admin/companies', requireAuth, requireRole('admin'), (req, res) => {
 app.get('/admin/partners', requireAuth, requireRole('admin'), (req, res) => {
   const parts = db.all("SELECT * FROM users WHERE role='partner' ORDER BY id DESC");
   res.send(shell({ title: 'Admin · Partners', user: req.user, body: `<h1>Partners<em>.</em></h1><p class="sub"><a href="/admin" style="color:var(--pink);font-weight:700">&larr; Admin</a></p>
-    ${parts.length ? `<div class="table-wrap"><table><tr><th>Partner</th><th>Code</th><th>Referred</th><th>Pending commission</th></tr>${parts.map(p => { const s = partnerStats(p.id); return `<tr><td><b>${esc(p.name)}</b><br><span class="sub">${esc(p.email)}</span></td><td>${esc(p.referral_code || '—')}</td><td>${s.cos.length}</td><td>R${s.commissionPending.toLocaleString()}</td></tr>`; }).join('')}</table></div>` : '<p class="sub">No partners yet.</p>'}` }));
+    ${parts.length ? `<div class="table-wrap"><table><tr><th>Partner</th><th>Code</th><th>Referred</th><th>Pending commission</th></tr>${parts.map(p => { const s = partnerStats(p.id); return `<tr><td><b>${esc(p.name)}</b><br><span class="sub">${esc(p.email)}</span></td><td>${esc(p.referral_code || '—')}</td><td>${s.cos.length}</td><td>R${s.commissionPending.toLocaleString('en-US')}</td></tr>`; }).join('')}</table></div>` : '<p class="sub">No partners yet.</p>'}` }));
 });
 app.get('/admin/payments', requireAuth, requireRole('admin'), (req, res) => {
   const rows = db.all('SELECT * FROM payments ORDER BY id DESC LIMIT 300');
   res.send(shell({ title: 'Admin · Payments', user: req.user, body: `<h1>Payments<em>.</em></h1><p class="sub"><a href="/admin" style="color:var(--pink);font-weight:700">&larr; Admin</a></p>
-    ${rows.length ? `<div class="table-wrap"><table><tr><th>Ref</th><th>Kind</th><th>Amount</th><th>Status</th><th>Date</th></tr>${rows.map(p => `<tr><td>${esc(p.reference)}</td><td>${esc(p.kind)}${p.plan ? ' · ' + esc(p.plan) : ''}</td><td>R${Number(p.amount).toLocaleString()}</td><td><span class="pill ${p.status === 'paid' ? 'done' : 'todo'}">${esc(p.status)}</span></td><td>${esc((p.created_at || '').slice(0, 10))}</td></tr>`).join('')}</table></div>` : '<p class="sub">No payments yet.</p>'}` }));
+    ${rows.length ? `<div class="table-wrap"><table><tr><th>Ref</th><th>Kind</th><th>Amount</th><th>Status</th><th>Date</th></tr>${rows.map(p => `<tr><td>${esc(p.reference)}</td><td>${esc(p.kind)}${p.plan ? ' · ' + esc(p.plan) : ''}</td><td>R${Number(p.amount).toLocaleString('en-US')}</td><td><span class="pill ${p.status === 'paid' ? 'done' : 'todo'}">${esc(p.status)}</span></td><td>${esc((p.created_at || '').slice(0, 10))}</td></tr>`).join('')}</table></div>` : '<p class="sub">No payments yet.</p>'}` }));
 });
 
 const PORT = process.env.PORT || 4000;
