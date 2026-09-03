@@ -700,6 +700,37 @@ ${r.salary_min ? `<salary><![CDATA[R${r.salary_min}${r.salary_max ? '-R' + r.sal
 </source>`);
 });
 
+// ---------- PUBLIC "TRY THE SCORE" DEMO (no signup) ----------
+app.get('/try', (req, res) => {
+  res.send(shell({ title: 'Try CALIBR free', user: user(req), body: `
+    <div class="eyebrow" style="color:var(--pink);font-weight:800;letter-spacing:.2em;text-transform:uppercase;font-size:11px">Free · no signup</div>
+    <h1>Score your CV against any job<em>.</em></h1>
+    <p class="sub">Paste your CV and a job ad — CALIBR scores the match, shows what's missing, and flags what an ATS would trip on. This is the real engine, free.</p>
+    <form method="post" action="/try">
+      <div class="fld inline">
+        <div style="flex:1"><label>Your CV</label><textarea name="cv" required style="min-height:220px" placeholder="Paste your CV text">${esc((req.query.cv || '').slice(0, 9000))}</textarea></div>
+        <div style="flex:1"><label>The job ad</label><textarea name="jd" required style="min-height:220px" placeholder="Paste the job advert / description"></textarea></div>
+      </div>
+      <button class="btn">Score my match — free</button>
+    </form>` }));
+});
+app.post('/try', async (req, res) => {
+  const cv = (req.body.cv || '').slice(0, 9000), jd = (req.body.jd || '').slice(0, 7000);
+  if (!cv || !jd) return res.redirect('/try');
+  const r = await ats.optimizeCV(cv, jd, 'Generic');
+  const chips = (arr, cls) => (arr && arr.length) ? arr.map(k => `<span class="chip ${cls}">${esc(k)}</span>`).join('') : '<span class="sub">none</span>';
+  res.send(shell({ title: 'Your match', user: user(req), body: `
+    <h1>Your match<em>.</em></h1><p class="sub">Scored by CALIBR's ATS engine · <a href="/try" style="color:var(--pink);font-weight:700">try another</a></p>
+    <div class="ats-grid">${matchBar(r.before)}${r.rewritten ? `<div class="ats-delta"><div class="ats-num" style="color:var(--pink)">${r.after}<span>%</span></div><div class="l">After CALIBR rewrite</div></div>` : ''}</div>
+    <div class="lbl">Matched the job on</div><div class="chips">${chips(r.matched, 'ok')}</div>
+    <div class="lbl">Missing vs the job</div><div class="chips">${chips(r.missing, 'miss')}</div>
+    ${r.flags && r.flags.length ? `<div class="lbl">ATS parse-safety</div><ul class="flags">${r.flags.map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
+    <div class="callout" style="background:var(--paper2,#f7f7f7);border-left:3px solid var(--pink);padding:16px 18px;margin-top:20px;border-radius:12px">
+      <b>That's a fraction of what CALIBR does.</b> Create a free account to build a <b>verified CALIBR Score</b> employers trust, practise interviews, and apply to real SA jobs.
+      <div class="actions" style="margin-top:12px"><a class="btn sm" href="/signup?role=seeker">Build my Score</a> <a class="btn sm g" href="/jobs">Browse jobs</a></div>
+    </div>` }));
+});
+
 // ---------- EMPLOYER ----------
 app.get('/company', requireAuth, requireRole('employer'), (req, res) => {
   const co = db.get('SELECT * FROM companies WHERE id=?', req.user.company_id) || { name: 'Your company' };
