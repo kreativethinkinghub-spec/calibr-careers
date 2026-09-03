@@ -708,7 +708,8 @@ app.get('/company', requireAuth, requireRole('employer'), (req, res) => {
     <h1>${esc(co.name)}<em>.</em></h1><p class="sub">Hire on evidence. Screen the pre-scored CALIBR talent pool. · <a href="/company/setup" style="color:var(--pink);font-weight:700">Setup guide</a></p>
     <div class="grid">
       <div class="card"><h3>Talent pool</h3><p>Candidates with a verified CALIBR Score</p><div class="score-num" style="font-size:44px">${poolSize}</div><a class="btn sm" href="/company/pool">Browse pool</a></div>
-      <div class="card"><h3>Post a role</h3><p>Write the JD, screen the pool, auto-distribute to job boards, and take applications with JD-scored CVs.</p><a class="btn sm block" href="/company/post">Post a job</a></div>
+      <div class="card"><h3>Post a role</h3><p>Write the JD, screen the pool, auto-distribute to job boards, and take applications with JD-scored CVs.</p><a class="btn sm block" href="/company/post">Post a job</a> <a class="btn sm block g" href="/company/jd">✦ AI JD writer</a></div>
+      <div class="card"><h3>Fairness audit</h3><p>Adverse-impact (4/5ths rule) across your pipeline</p><a class="btn sm g" href="/company/audit">Run audit</a></div>
       <div class="card"><h3>Analytics</h3><p>Pipeline funnel, time-to-hire &amp; source quality</p><a class="btn sm g" href="/company/analytics">View analytics</a></div>
       <div class="card"><h3>Reports</h3><p>B-BBEE &amp; EE reporting</p><a class="btn sm g" href="/company/reports">View reports</a></div>
       <div class="card"><h3>Culture profile</h3><p>${cultureSet ? 'Defined — scoring is company-relative' : 'Define what your company values'}</p><a class="btn sm ${cultureSet ? 'g' : ''}" href="/company/culture">${cultureSet ? 'Edit profile' : 'Set up profile'}</a></div>
@@ -986,6 +987,7 @@ app.get('/company/app/:id', requireAuth, requireRole('employer'), (req, res) => 
     <h1>${esc(a.name)}<em>.</em></h1>
     <p class="sub"><a href="/company/role/${a.role_id}/pipeline" style="color:var(--pink);font-weight:700">&larr; Pipeline</a> · ${esc(a.title)} · ${esc(a.email)}${sc ? ` · <a href="/verify/${sc.token}" style="color:var(--pink);font-weight:700">CALIBR Score ${sc.composite}</a>` : ' · no CALIBR Score yet'}</p>
     <div class="ats-grid">${matchBar(a.jd_match != null ? a.jd_match : 0)}<div class="ats-delta"><div class="ats-num" style="color:var(--pink)">${a.fit}<span></span></div><div class="l">Blended fit${sc ? ' (JD + CALIBR)' : ''}</div></div></div>
+    <div class="actions"><a class="btn sm g" href="/company/app/${a.id}/summary">✦ AI CV summary</a> <a class="btn sm g" href="/company/app/${a.id}/questions">✦ Interview kit</a></div>
     ${rep.summary ? `<div class="msg">${esc(rep.summary)}${rep.seniority_fit ? ' · seniority: ' + esc(rep.seniority_fit) : ''}</div>` : ''}
     <div class="lbl">Matched the job on</div><div class="chips">${chips(rep.matched, 'ok')}</div>
     <div class="lbl">Missing vs the job</div><div class="chips">${chips(rep.missing, 'miss')}</div>
@@ -1271,4 +1273,5 @@ app.get('/admin/payments', requireAuth, requireRole('admin'), (req, res) => {
 
 const PORT = process.env.PORT || 4000;
 hiring = require('./hiring')({ app, db, shell, esc, now, requireAuth, requireRole, STAGES });
+require('./intelligence')({ app, db, shell, esc, now, requireAuth, requireRole, ai: require('./ai') });
 app.listen(PORT, () => console.log('CALIBR app running on http://localhost:' + PORT));
