@@ -86,6 +86,14 @@ CREATE TABLE IF NOT EXISTS interviews (
   score INTEGER,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  application_id INTEGER NOT NULL,
+  author_id INTEGER,
+  author_name TEXT,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS scorecards (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   role_id INTEGER NOT NULL,
@@ -179,6 +187,7 @@ for (const stmt of [
   "ALTER TABLE applications ADD COLUMN cv_text TEXT",          // CV as applied
   "ALTER TABLE applications ADD COLUMN source TEXT",           // pool | public | bulk
   "ALTER TABLE applications ADD COLUMN hired_at TEXT",         // set when stage -> Hired (time-to-hire)
+  "ALTER TABLE users ADD COLUMN phone TEXT",                   // mobile for WhatsApp notifications
   // --- billing ---
   "ALTER TABLE users ADD COLUMN plan TEXT",                    // seeker/employer subscription plan
   "ALTER TABLE users ADD COLUMN plan_since TEXT",

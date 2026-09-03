@@ -15,9 +15,11 @@ const distribute = require('./distribute');
 const oauth = require('./oauth');
 const coach = require('./coach');
 const paystack = require('./paystack');
+const notify = require('./notify');
 
 const SqliteStore = require('./store');
 let hiring = null; // employer hiring toolkit (scorecards, scheduling, analytics) — registered before listen
+let collab = null; // careers page + candidate comments — registered before listen
 
 const app = express();
 const PROD = process.env.NODE_ENV === 'production';
@@ -632,6 +634,7 @@ app.get('/jobs/:token/apply', (req, res) => {
     <h1>Apply · ${esc(role.title)}<em>.</em></h1><p class="sub">${esc(role.company)} — your CV is checked against this job the moment you apply.</p>
     <form method="post" action="/jobs/${role.public_token}/apply">
       <div class="fld inline"><div style="flex:1"><label>Full name</label><input name="name" required value="${esc(u ? u.name : '')}"></div><div style="flex:1"><label>Email</label><input type="email" name="email" required value="${esc(u ? u.email : '')}"></div></div>
+      <div class="fld"><label>WhatsApp number (for updates)</label><input name="phone" placeholder="082 123 4567" value="${esc(u && u.phone || '')}"><span class="sub" style="font-size:11px">We'll send your application status and interview invites here. Optional.</span></div>
       <div class="fld"><label>Paste your CV</label><textarea name="cv" required style="min-height:240px" placeholder="Paste your CV text">${esc(u && u.cv || '')}</textarea></div>
       <div class="fld" style="font-size:12px;color:var(--grey)"><label style="text-transform:none;letter-spacing:0;font-weight:500"><input type="checkbox" name="consent" required style="width:auto;margin-right:8px">I consent to ${esc(role.company)} and CALIBR processing this application per the POPIA-aligned privacy policy.</label></div>
       <button class="btn">Submit application</button>
@@ -642,16 +645,16 @@ app.post('/jobs/:token/apply', async (req, res) => {
   const role = db.get('SELECT * FROM roles_posted WHERE public_token=? AND is_public=1', req.params.token);
   if (!role) return res.redirect('/jobs');
   if (!req.body.consent) return res.redirect('/jobs/' + role.public_token + '/apply');
-  const name = (req.body.name || '').slice(0, 120), email = (req.body.email || '').toLowerCase().slice(0, 160), cv = (req.body.cv || '').slice(0, 9000);
+  const name = (req.body.name || '').slice(0, 120), email = (req.body.email || '').toLowerCase().slice(0, 160), cv = (req.body.cv || '').slice(0, 9000), phone = (req.body.phone || '').slice(0, 30) || null;
   if (!email || !cv) return res.redirect('/jobs/' + role.public_token + '/apply');
   // find-or-create a candidate account (external applicants become seekers so they can claim their profile later)
   let u = db.get('SELECT * FROM users WHERE email=?', email);
   if (!u) {
     const hash = bcrypt.hashSync(crypto.randomBytes(9).toString('hex'), 10);
-    const ins = db.run('INSERT INTO users (role,name,email,pass,consent_at,cv,created_at) VALUES (?,?,?,?,?,?,?)', 'seeker', name || email, email, hash, now(), cv, now());
+    const ins = db.run('INSERT INTO users (role,name,email,pass,consent_at,cv,phone,created_at) VALUES (?,?,?,?,?,?,?,?)', 'seeker', name || email, email, hash, now(), cv, phone, now());
     u = db.get('SELECT * FROM users WHERE id=?', Number(ins.lastInsertRowid));
   } else {
-    db.run('UPDATE users SET cv=? WHERE id=?', cv, u.id);
+    db.run('UPDATE users SET cv=?, phone=COALESCE(?,phone) WHERE id=?', cv, phone, u.id);
   }
   // score CV against THIS job
   let kws = roleKeywords(role);
@@ -664,6 +667,7 @@ app.post('/jobs/:token/apply', async (req, res) => {
   const ex = db.get('SELECT id FROM applications WHERE role_id=? AND user_id=?', role.id, u.id);
   if (ex) db.run('UPDATE applications SET jd_match=?, jd_report=?, cv_text=?, fit=?, source=? WHERE id=?', scored.match, report, cv, fit, 'public', ex.id);
   else db.run('INSERT INTO applications (role_id,user_id,stage,fit,jd_match,jd_report,cv_text,source,created_at) VALUES (?,?,?,?,?,?,?,?,?)', role.id, u.id, 'New', fit, scored.match, report, cv, 'public', now());
+  if (phone) { const co = db.get('SELECT name FROM companies WHERE id=?', role.company_id) || {}; notify.fire(phone, notify.T.applied(name, role.title, co.name || 'the company')); }
   res.send(shell({ title: 'Applied', user: user(req), body: `
     <div style="text-align:center;padding:40px 0">
       <h1>Application received<em>.</em></h1>
@@ -710,6 +714,7 @@ app.get('/company', requireAuth, requireRole('employer'), (req, res) => {
       <div class="card"><h3>Talent pool</h3><p>Candidates with a verified CALIBR Score</p><div class="score-num" style="font-size:44px">${poolSize}</div><a class="btn sm" href="/company/pool">Browse pool</a></div>
       <div class="card"><h3>Post a role</h3><p>Write the JD, screen the pool, auto-distribute to job boards, and take applications with JD-scored CVs.</p><a class="btn sm block" href="/company/post">Post a job</a> <a class="btn sm block g" href="/company/jd">✦ AI JD writer</a></div>
       <div class="card"><h3>Fairness audit</h3><p>Adverse-impact (4/5ths rule) across your pipeline</p><a class="btn sm g" href="/company/audit">Run audit</a></div>
+      <div class="card"><h3>Careers page</h3><p>Your public branded job board${notify.enabled() ? ' · WhatsApp updates on' : ''}</p><a class="btn sm g" href="/careers/${req.user.company_id}" target="_blank">View careers page</a></div>
       <div class="card"><h3>Analytics</h3><p>Pipeline funnel, time-to-hire &amp; source quality</p><a class="btn sm g" href="/company/analytics">View analytics</a></div>
       <div class="card"><h3>Reports</h3><p>B-BBEE &amp; EE reporting</p><a class="btn sm g" href="/company/reports">View reports</a></div>
       <div class="card"><h3>Culture profile</h3><p>${cultureSet ? 'Defined — scoring is company-relative' : 'Define what your company values'}</p><a class="btn sm ${cultureSet ? 'g' : ''}" href="/company/culture">${cultureSet ? 'Edit profile' : 'Set up profile'}</a></div>
@@ -994,15 +999,17 @@ app.get('/company/app/:id', requireAuth, requireRole('employer'), (req, res) => 
     ${rep.flags && rep.flags.length ? `<div class="lbl">CV parse-safety</div><ul class="flags">${rep.flags.map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
     ${cultureHtml}
     ${hiring ? hiring.applicantExtras(a.id, a.role_id) : ''}
+    ${collab ? collab.commentsHtml(a.id) : ''}
     <div class="lbl">CV as applied</div><div class="q" style="white-space:pre-wrap;font-size:13px;line-height:1.6">${esc(a.cv_text || 'No CV text stored.')}</div>` }));
 });
 
 app.post('/company/app/:id/stage', requireAuth, requireRole('employer'), (req, res) => {
-  const a = db.get('SELECT a.*, r.company_id, r.salary FROM applications a JOIN roles_posted r ON r.id=a.role_id WHERE a.id=?', req.params.id);
+  const a = db.get('SELECT a.*, r.company_id, r.salary, r.title, u.name uname, u.phone uphone FROM applications a JOIN roles_posted r ON r.id=a.role_id JOIN users u ON u.id=a.user_id WHERE a.id=?', req.params.id);
   if (!a || a.company_id !== req.user.company_id) return res.redirect('/company');
   const stage = STAGES.includes(req.body.stage) ? req.body.stage : a.stage;
   db.run('UPDATE applications SET stage=? WHERE id=?', stage, a.id);
   if (stage === 'Hired' && a.stage !== 'Hired') db.run('UPDATE applications SET hired_at=? WHERE id=? AND hired_at IS NULL', now(), a.id);
+  if (stage !== a.stage && a.uphone && ['Shortlist', 'Interview', 'Offer', 'Hired'].includes(stage)) notify.fire(a.uphone, notify.T.stage(a.uname, a.title, stage));
   res.redirect('/company/role/' + a.role_id + '/pipeline');
 });
 
@@ -1272,6 +1279,7 @@ app.get('/admin/payments', requireAuth, requireRole('admin'), (req, res) => {
 });
 
 const PORT = process.env.PORT || 4000;
-hiring = require('./hiring')({ app, db, shell, esc, now, requireAuth, requireRole, STAGES });
+hiring = require('./hiring')({ app, db, shell, esc, now, requireAuth, requireRole, STAGES, notify });
 require('./intelligence')({ app, db, shell, esc, now, requireAuth, requireRole, ai: require('./ai') });
+collab = require('./collab')({ app, db, shell, esc, now, requireAuth, requireRole });
 app.listen(PORT, () => console.log('CALIBR app running on http://localhost:' + PORT));

@@ -3,7 +3,7 @@
 // scheduling, and pipeline analytics. Registers its own routes and returns a
 // helper that renders the per-applicant add-ons for the applicant detail page.
 module.exports = function registerHiring(ctx) {
-  const { app, db, shell, esc, now, requireAuth, requireRole, STAGES } = ctx;
+  const { app, db, shell, esc, now, requireAuth, requireRole, STAGES, notify } = ctx;
   const E = requireRole('employer');
 
   const DEFAULT_CRITERIA = [
@@ -22,7 +22,7 @@ module.exports = function registerHiring(ctx) {
     return DEFAULT_CRITERIA;
   }
   function ownRole(id, cid) { return db.get('SELECT * FROM roles_posted WHERE id=? AND company_id=?', id, cid); }
-  function ownApp(id, cid) { return db.get('SELECT a.*, u.name, r.title, r.company_id FROM applications a JOIN roles_posted r ON r.id=a.role_id JOIN users u ON u.id=a.user_id WHERE a.id=?', id); }
+  function ownApp(id, cid) { return db.get('SELECT a.*, u.name, u.phone, r.title, r.company_id FROM applications a JOIN roles_posted r ON r.id=a.role_id JOIN users u ON u.id=a.user_id WHERE a.id=?', id); }
 
   // ---------- Scorecard definition (per role) ----------
   app.get('/company/role/:id/scorecard', requireAuth, E, (req, res) => {
@@ -82,7 +82,10 @@ module.exports = function registerHiring(ctx) {
   app.post('/company/app/:id/schedule', requireAuth, E, (req, res) => {
     const a = ownApp(req.params.id, req.user.company_id); if (!a || a.company_id !== req.user.company_id) return res.redirect('/company');
     const when = (req.body.when_at || '').slice(0, 40), mode = ['video', 'in-person', 'phone'].includes(req.body.mode) ? req.body.mode : 'video', loc = (req.body.location || '').slice(0, 300);
-    if (when) db.run('INSERT INTO interview_slots (application_id,company_id,when_at,mode,location,status,created_at) VALUES (?,?,?,?,?,?,?)', a.id, req.user.company_id, when, mode, loc, 'scheduled', now());
+    if (when) {
+      db.run('INSERT INTO interview_slots (application_id,company_id,when_at,mode,location,status,created_at) VALUES (?,?,?,?,?,?,?)', a.id, req.user.company_id, when, mode, loc, 'scheduled', now());
+      if (notify && a.phone) notify.fire(a.phone, notify.T.interview(a.name, a.title, when.replace('T', ' '), mode, loc));
+    }
     res.redirect('/company/app/' + a.id);
   });
   app.post('/company/interview/:sid/cancel', requireAuth, E, (req, res) => {
