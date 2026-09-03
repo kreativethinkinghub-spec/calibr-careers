@@ -17,6 +17,7 @@ const coach = require('./coach');
 const paystack = require('./paystack');
 
 const SqliteStore = require('./store');
+let hiring = null; // employer hiring toolkit (scorecards, scheduling, analytics) — registered before listen
 
 const app = express();
 const PROD = process.env.NODE_ENV === 'production';
@@ -708,6 +709,7 @@ app.get('/company', requireAuth, requireRole('employer'), (req, res) => {
     <div class="grid">
       <div class="card"><h3>Talent pool</h3><p>Candidates with a verified CALIBR Score</p><div class="score-num" style="font-size:44px">${poolSize}</div><a class="btn sm" href="/company/pool">Browse pool</a></div>
       <div class="card"><h3>Post a role</h3><p>Write the JD, screen the pool, auto-distribute to job boards, and take applications with JD-scored CVs.</p><a class="btn sm block" href="/company/post">Post a job</a></div>
+      <div class="card"><h3>Analytics</h3><p>Pipeline funnel, time-to-hire &amp; source quality</p><a class="btn sm g" href="/company/analytics">View analytics</a></div>
       <div class="card"><h3>Reports</h3><p>B-BBEE &amp; EE reporting</p><a class="btn sm g" href="/company/reports">View reports</a></div>
       <div class="card"><h3>Culture profile</h3><p>${cultureSet ? 'Defined — scoring is company-relative' : 'Define what your company values'}</p><a class="btn sm ${cultureSet ? 'g' : ''}" href="/company/culture">${cultureSet ? 'Edit profile' : 'Set up profile'}</a></div>
       <div class="card"><h3>Connections</h3><p>${connCount ? connCount + ' of ' + distribute.PARTNERS.length + ' job platforms connected' : 'Connect the job boards you use'}</p><a class="btn sm ${connCount ? 'g' : ''}" href="/company/connections">Manage connections</a></div>
@@ -918,7 +920,7 @@ app.get('/company/role/:id', requireAuth, requireRole('employer'), (req, res) =>
   res.send(shell({ title: 'Screen: ' + role.title, user: req.user, body: `
     <h1>Screen · ${esc(role.title)}<em>.</em></h1>
     <p class="sub">${role.salary ? 'R' + Number(role.salary).toLocaleString() + '/yr · ' : ''}Every scored candidate ranked by fit to this role. <a href="/company/role/${role.id}/pipeline" style="color:var(--pink);font-weight:700">View pipeline &rarr;</a></p>
-    <div class="actions"><a class="btn sm" href="/company/role/${role.id}/bulk">Bulk CV upload</a> <a class="btn sm g" href="/company/role/${role.id}/distribute">Distribute</a></div>
+    <div class="actions"><a class="btn sm" href="/company/role/${role.id}/bulk">Bulk CV upload</a> <a class="btn sm g" href="/company/role/${role.id}/distribute">Distribute</a> <a class="btn sm g" href="/company/role/${role.id}/scorecard">Scorecard</a></div>
     <div class="lbl">Rubric weights (per axis)</div>
     <form method="post" action="/company/role/${role.id}/weights" class="fld inline">
       ${AXES.map(k => `<div><label style="font-size:10px">${esc(k)}</label><input type="number" name="w_${esc(k)}" value="${w[k] != null ? w[k] : 20}" min="0" max="100"></div>`).join('')}
@@ -989,6 +991,7 @@ app.get('/company/app/:id', requireAuth, requireRole('employer'), (req, res) => 
     <div class="lbl">Missing vs the job</div><div class="chips">${chips(rep.missing, 'miss')}</div>
     ${rep.flags && rep.flags.length ? `<div class="lbl">CV parse-safety</div><ul class="flags">${rep.flags.map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
     ${cultureHtml}
+    ${hiring ? hiring.applicantExtras(a.id, a.role_id) : ''}
     <div class="lbl">CV as applied</div><div class="q" style="white-space:pre-wrap;font-size:13px;line-height:1.6">${esc(a.cv_text || 'No CV text stored.')}</div>` }));
 });
 
@@ -997,6 +1000,7 @@ app.post('/company/app/:id/stage', requireAuth, requireRole('employer'), (req, r
   if (!a || a.company_id !== req.user.company_id) return res.redirect('/company');
   const stage = STAGES.includes(req.body.stage) ? req.body.stage : a.stage;
   db.run('UPDATE applications SET stage=? WHERE id=?', stage, a.id);
+  if (stage === 'Hired' && a.stage !== 'Hired') db.run('UPDATE applications SET hired_at=? WHERE id=? AND hired_at IS NULL', now(), a.id);
   res.redirect('/company/role/' + a.role_id + '/pipeline');
 });
 
@@ -1266,4 +1270,5 @@ app.get('/admin/payments', requireAuth, requireRole('admin'), (req, res) => {
 });
 
 const PORT = process.env.PORT || 4000;
+hiring = require('./hiring')({ app, db, shell, esc, now, requireAuth, requireRole, STAGES });
 app.listen(PORT, () => console.log('CALIBR app running on http://localhost:' + PORT));

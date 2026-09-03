@@ -86,6 +86,33 @@ CREATE TABLE IF NOT EXISTS interviews (
   score INTEGER,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS scorecards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  role_id INTEGER NOT NULL,
+  criteria TEXT NOT NULL,             -- JSON [{name,weight}]
+  created_at TEXT NOT NULL,
+  UNIQUE(role_id)
+);
+CREATE TABLE IF NOT EXISTS scorecard_reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  application_id INTEGER NOT NULL,
+  reviewer TEXT,
+  ratings TEXT,                       -- JSON {criterion: 1..5}
+  overall INTEGER,                    -- weighted 0..100
+  recommendation TEXT,                -- strong_yes|yes|no|strong_no
+  notes TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS interview_slots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  application_id INTEGER NOT NULL,
+  company_id INTEGER NOT NULL,
+  when_at TEXT,
+  mode TEXT,                          -- video | in-person | phone
+  location TEXT,
+  status TEXT NOT NULL DEFAULT 'scheduled',
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS wellness_checkins (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
@@ -151,6 +178,7 @@ for (const stmt of [
   "ALTER TABLE applications ADD COLUMN jd_report TEXT",        // JSON {matched,missing,flags,summary}
   "ALTER TABLE applications ADD COLUMN cv_text TEXT",          // CV as applied
   "ALTER TABLE applications ADD COLUMN source TEXT",           // pool | public | bulk
+  "ALTER TABLE applications ADD COLUMN hired_at TEXT",         // set when stage -> Hired (time-to-hire)
   // --- billing ---
   "ALTER TABLE users ADD COLUMN plan TEXT",                    // seeker/employer subscription plan
   "ALTER TABLE users ADD COLUMN plan_since TEXT",
