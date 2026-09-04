@@ -17,5 +17,8 @@
     "ejs": "^3.1.10",
     "express": "^4.21.2",
     "express-session": "^1.18.1"
+  },
+  "optionalDependencies": {
+    "libsql": "^0.5.0"
   }
 }

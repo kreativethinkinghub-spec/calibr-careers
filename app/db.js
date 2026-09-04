@@ -1,12 +1,31 @@
 'use strict';
-const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
 
-// DB path is configurable so it can live on a mounted persistent disk in the cloud (e.g. Render /data).
+// ---- Storage backend (chosen at boot; the rest of the app is unchanged either way) ----
+//  • TURSO (serverless / deploy-anywhere): set TURSO_DATABASE_URL (+ TURSO_AUTH_TOKEN). The app keeps a
+//    local SQLite *replica* it reads/writes synchronously, and syncs to the Turso cloud DB — so the
+//    durable data lives in the cloud and the app needs NO persistent disk. Runs on any Node host.
+//    Uses the `libsql` driver (better-sqlite3-compatible, synchronous). Read-your-writes is on by default.
+//  • DEFAULT: Node's built-in node:sqlite on a local file (DB_PATH) — for local dev and disk-backed hosts.
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'calibr.db');
 try { fs.mkdirSync(path.dirname(DB_PATH), { recursive: true }); } catch (e) {}
-const db = new DatabaseSync(DB_PATH);
+
+let db, backend;
+if (process.env.TURSO_DATABASE_URL) {
+  let Database;
+  try { Database = require('libsql'); }
+  catch (e) { throw new Error('TURSO_DATABASE_URL is set but the `libsql` driver is not installed. Run `npm install libsql`. Original: ' + (e && e.message)); }
+  db = new Database(DB_PATH, { syncUrl: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN });
+  backend = 'turso';
+  try { db.sync(); } catch (e) { console.error('Turso initial sync failed:', e && e.message); }
+  const t = setInterval(() => { try { db.sync(); } catch (e) {} }, 15000);
+  if (t.unref) t.unref();
+} else {
+  const { DatabaseSync } = require('node:sqlite');
+  db = new DatabaseSync(DB_PATH);
+  backend = 'sqlite';
+}
 try { db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=4000;'); } catch (e) {}
 
 db.exec(`
@@ -211,9 +230,12 @@ for (const stmt of [
 // Persistent session store table (replaces in-memory MemoryStore for production).
 db.exec(`CREATE TABLE IF NOT EXISTS sessions (sid TEXT PRIMARY KEY, sess TEXT NOT NULL, expire INTEGER NOT NULL)`);
 
+// Normalise params: undefined -> null (Turso/better-sqlite3 rejects undefined; node:sqlite tolerates it).
+const clean = p => p.map(v => v === undefined ? null : v);
 module.exports = {
   raw: db,
-  get(sql, ...p) { return db.prepare(sql).get(...p); },
-  all(sql, ...p) { return db.prepare(sql).all(...p); },
-  run(sql, ...p) { return db.prepare(sql).run(...p); },
+  backend,
+  get(sql, ...p) { return db.prepare(sql).get(...clean(p)); },
+  all(sql, ...p) { return db.prepare(sql).all(...clean(p)); },
+  run(sql, ...p) { return db.prepare(sql).run(...clean(p)); },
 };
