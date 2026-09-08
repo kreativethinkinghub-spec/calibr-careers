@@ -1,0 +1,10 @@
+node_modules
+db
+*.db
+*.db-wal
+*.db-shm
+.env
+*.log
+npm-debug.log*
+.git
+fly.toml
