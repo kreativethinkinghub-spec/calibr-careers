@@ -8,7 +8,8 @@ const fs = require('fs');
 //    durable data lives in the cloud and the app needs NO persistent disk. Runs on any Node host.
 //    Uses the `libsql` driver (better-sqlite3-compatible, synchronous). Read-your-writes is on by default.
 //  • DEFAULT: Node's built-in node:sqlite on a local file (DB_PATH) — for local dev and disk-backed hosts.
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'calibr.db');
+// On Vercel only /tmp is writable, so the local SQLite replica lives there (Turso holds the durable copy).
+const DB_PATH = process.env.DB_PATH || (process.env.VERCEL ? '/tmp/calibr.db' : path.join(__dirname, 'db', 'calibr.db'));
 try { fs.mkdirSync(path.dirname(DB_PATH), { recursive: true }); } catch (e) {}
 
 let db, backend;

@@ -1331,4 +1331,10 @@ hiring = require('./hiring')({ app, db, shell, esc, now, requireAuth, requireRol
 require('./intelligence')({ app, db, shell, esc, now, requireAuth, requireRole, ai: require('./ai') });
 collab = require('./collab')({ app, db, shell, esc, now, requireAuth, requireRole });
 webhooks = require('./publicapi')({ app, db, shell, esc, now, requireAuth, requireRole });
-app.listen(PORT, () => console.log('CALIBR app running on http://localhost:' + PORT));
+
+// Listen only when run directly (local dev / Render / Fly / any container). On Vercel the app is
+// imported by api/index.js as a serverless handler, so it must be exported and must NOT call listen.
+if (require.main === module) {
+  app.listen(PORT, () => console.log('CALIBR app running on http://localhost:' + PORT));
+}
+module.exports = app;

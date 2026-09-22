@@ -1,0 +1,8 @@
+db
+*.db
+*.db-wal
+*.db-shm
+.env
+*.log
+fly.toml
+Dockerfile
