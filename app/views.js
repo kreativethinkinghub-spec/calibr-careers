@@ -30,7 +30,19 @@ function shell({ title = 'CALIBR', user = null, body = '', head = '' }) {
   <link rel="stylesheet" href="/css/app.css">${head || ''}</head><body>
   ${nav}
   <main><div class="wrap">${body}</div></main>
-  <div class="foot">CALIBR · a product of KTH-Tech · Reg 2025/627290/07 · POPIA-first · <a href="/methodology" style="color:var(--pink);font-weight:700">Methodology &amp; evidence</a></div>
+  <div class="foot">
+    <div style="margin-bottom:8px">
+      <a href="/methodology" style="color:var(--pink);font-weight:700">Methodology &amp; evidence</a>
+      · <a href="https://calibr-careers.tech/terms.html" target="_blank" rel="noopener">Terms</a>
+      · <a href="https://calibr-careers.tech/privacy.html" target="_blank" rel="noopener">Privacy / POPIA</a>
+      · <a href="https://calibr-careers.tech/cookies.html" target="_blank" rel="noopener">Cookies</a>
+      · <a href="https://calibr-careers.tech/acceptable-use.html" target="_blank" rel="noopener">Acceptable Use</a>
+      · <a href="https://calibr-careers.tech/refund-policy.html" target="_blank" rel="noopener">Refunds</a>
+      · <a href="https://calibr-careers.tech/sla.html" target="_blank" rel="noopener">SLA</a>
+      · <a href="https://calibr-careers.tech/legal.html" target="_blank" rel="noopener" style="color:var(--pink);font-weight:700">All policies &amp; procedures</a>
+    </div>
+    CALIBR · a product of KTH-Tech · Reg 2025/627290/07 · POPIA-first · Gauteng, South Africa
+  </div>
   </body></html>`;
 }
 module.exports = { shell, esc };

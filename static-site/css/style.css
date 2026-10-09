@@ -270,3 +270,7 @@ a{color:inherit;text-decoration:none}
   .sh-l,.sh-r{clip-path:none}
   .logo .wm span{transform:translateY(0)}
 }
+
+/* Definition-style lists: stack bold label over its description (added with the legal suite). */
+.longform li>strong{display:block}
+.longform li>strong+span{display:block;font-weight:500;color:var(--ink);margin-top:2px}

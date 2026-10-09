@@ -102,3 +102,6 @@ ul.flags{list-style:none;margin:0 0 8px}
 ul.flags li{position:relative;padding:8px 12px 8px 26px;border-left:3px solid var(--pink);background:var(--paper2);margin-bottom:6px;font-size:13.5px;line-height:1.5}
 ul.flags li:before{content:"!";position:absolute;left:10px;top:8px;font-weight:900;color:var(--pink)}
 @media(max-width:560px){.ats-num{font-size:42px}}
+/* Footer legal links: clearly clickable (added with the legal suite) */
+.foot a{color:var(--ink);text-decoration:underline;text-underline-offset:2px}
+.foot a:hover{color:var(--pink)}
