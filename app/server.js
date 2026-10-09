@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const path = require('path');
 const db = require('./db');
 const { shell, esc } = require('./views');
+const mail = require('./mail');
 const { BANK, grade } = require('./assessments');
 const llm = require('./llm');
 const ats = require('./ats');
@@ -28,8 +29,9 @@ if (PROD) {
   app.set('trust proxy', 1); // behind a TLS-terminating proxy (Render/Cloudflare/nginx)
   if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === 'change-me') console.warn('WARNING: set a strong SESSION_SECRET in production.');
 }
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/css', express.static(path.join(__dirname, 'public', 'css')));
+app.use('/js', express.static(path.join(__dirname, 'public', 'js')));
 app.use(session({
   store: new SqliteStore(),
   secret: 'calibr-' + (process.env.SESSION_SECRET || 'dev-change-me'),
@@ -106,7 +108,7 @@ function companyConnections(companyId) {
 
 function user(req) { return req.session.uid ? db.get('SELECT * FROM users WHERE id=?', req.session.uid) : null; }
 function requireAuth(req, res, next) { const u = user(req); if (!u) return res.redirect('/login'); req.user = u; next(); }
-function requireRole(role) { return (req, res, next) => { if (req.user.role !== role) return res.status(403).send('Forbidden'); next(); }; }
+function requireRole(...roles) { return (req, res, next) => { if (!roles.includes(req.user.role)) return res.status(403).send('Forbidden'); next(); }; }
 
 // ---------- HOME ----------
 let LANDING = null; try { LANDING = fs.readFileSync(path.join(__dirname, 'landing.html'), 'utf8'); } catch (e) { /* no landing file */ }
@@ -121,6 +123,58 @@ app.get('/', (req, res) => {
       <a class="btn" href="/signup">Get started</a> &nbsp; <a class="btn g" href="/login">Sign in</a>
       <p style="margin-top:24px;font-size:13px;color:var(--grey)">This is the working app (early build). <a href="https://calibr-careers.tech" style="color:var(--pink);font-weight:700">See the marketing site</a></p>
     </div>` }));
+});
+
+// ---------- PRICING ----------
+app.get('/pricing', (req, res) => {
+  const u = user(req);
+  const tier = (name, price, per, tagline, feats, cta, href, hot) => `
+    <div style="border:${hot ? '2px solid var(--pink)' : '1.5px solid #e4e4e4'};border-radius:14px;padding:22px 20px;display:flex;flex-direction:column;position:relative;background:#fff">
+      ${hot ? '<div style="position:absolute;top:-11px;left:20px;background:var(--pink);color:#fff;font-size:11px;font-weight:800;letter-spacing:.04em;padding:3px 10px;border-radius:999px;text-transform:uppercase">Most popular</div>' : ''}
+      <div style="font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--pink)">${name}</div>
+      <div style="font-family:'Archivo',Inter,sans-serif;font-weight:900;font-size:34px;letter-spacing:-.02em;margin:7px 0 2px">${price}${per ? `<span style="font-size:14px;font-weight:600;color:#666">${per}</span>` : ''}</div>
+      <div style="font-size:12.5px;color:#444;margin-bottom:13px">${tagline}</div>
+      <ul style="list-style:none;margin:0 0 16px;padding:0;display:grid;gap:7px">
+        ${feats.map(f => `<li style="font-size:13px;line-height:1.35;padding-left:19px;position:relative"><span style="position:absolute;left:0;color:var(--pink);font-weight:900">&#10003;</span>${f}</li>`).join('')}
+      </ul>
+      <a class="btn${hot ? '' : ' g'}" style="margin-top:auto;text-align:center" href="${href}">${cta}</a>
+    </div>`;
+  const body = `
+  <div style="text-align:center;max-width:760px;margin:0 auto 10px">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--pink)">Pricing · ZAR</div>
+    <h1 style="font-size:40px;margin:8px 0 6px">One flat subscription.<br>No success fees.</h1>
+    <p class="sub">Priced in rand. Hire on evidence for a predictable monthly fee — never a cut of every placement.</p>
+  </div>
+
+  <h2 style="margin:26px 0 4px">For employers</h2>
+  <p style="color:#555;font-size:14px;margin-bottom:16px">Unlimited screening. Cancel anytime. Enterprise runs on a 3-month minimum term.</p>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px">
+    ${tier('Startup', 'R1,499', '/mo', 'For a single team getting started.', [
+      'Up to <b>5 active roles</b>', 'Evidence-based CALIBR Score', 'JD-aware apply &mdash; scored on submit', 'ATS ranking + branded careers page', 'Google-for-Jobs distribution'
+    ], 'Start hiring', '/signup?role=employer', false)}
+    ${tier('Growth', 'R4,999', '/mo', 'For scaling, multi-role hiring.', [
+      '<b>Up to 20 roles</b> &mdash; everything in Startup, plus:', 'Company-relative <b>Culture-Fit</b> (7 dimensions)', 'Bulk CV ranking', 'Connect your own job boards', 'Pipeline analytics + <b>fairness audit</b>'
+    ], 'Start hiring', '/signup?role=employer', true)}
+    ${tier('Enterprise', 'Custom', '', 'For groups & regulated hiring.', [
+      '<b>Unlimited</b> roles &amp; seats', 'SSO / SAML', 'REST API + webhooks (HRIS)', 'White-label + dedicated success manager', '99.9% SLA &middot; SA data residency'
+    ], 'Book a call', '/signup?role=employer', false)}
+  </div>
+
+  <h2 style="margin:40px 0 16px">For job seekers</h2>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px">
+    ${tier('Starter', 'R199', '/mo', 'Prove your worth.', [
+      'Verified, shareable CALIBR Score', 'ATS CV optimiser vs any job ad', 'Apply with your Score attached'
+    ], 'Build my Score', '/signup?role=seeker', false)}
+    ${tier('Pro', 'R349', '/mo', 'Stand out, every application.', [
+      'Everything in Starter', 'AI mock interviews + cover letters', 'Personal growth path'
+    ], 'Build my Score', '/signup?role=seeker', true)}
+    ${tier('Pro+', 'R499', '/mo', 'The full career toolkit.', [
+      'Everything in Pro', 'Priority role matching', 'Unlimited optimisations'
+    ], 'Build my Score', '/signup?role=seeker', false)}
+  </div>
+
+  <p style="text-align:center;color:#666;font-size:12.5px;margin-top:28px">Prices in ZAR, excl. VAT where applicable. No per-hire or success fees on any plan. <a href="/methodology" style="color:var(--pink);font-weight:700">How the Score works</a></p>`;
+  res.send(shell({ title: 'Pricing', user: u, body }));
 });
 
 // ---------- AUTH ----------
@@ -168,8 +222,28 @@ app.post('/signup', (req, res) => {
     // attribute the company to a referring partner if a valid ref code was supplied
     if (req.body.ref) { const p = db.get("SELECT id FROM users WHERE referral_code=? AND role='partner'", String(req.body.ref).toUpperCase()); if (p) db.run('UPDATE companies SET referred_by=? WHERE id=?', p.id, companyId); }
   }
+  // Email verification via KTH Mail (non-blocking — user can use the app; a banner nudges them).
+  const vtoken = crypto.randomBytes(24).toString('hex');
+  db.run('UPDATE users SET verify_token=? WHERE id=?', vtoken, uid);
+  mail.sendEmail(email, 'verify-email', { name: (name || '').split(' ')[0], email, link: absUrl(req, '/verify-email/' + vtoken), brand: 'CALIBR', expires: '24 hours' }, 'verify-' + uid).catch(() => {});
   req.session.uid = uid;
   res.redirect(role === 'employer' ? '/company/setup' : role === 'partner' ? '/partner' : role === 'admin' ? '/admin' : '/app/setup');
+});
+// Confirm email
+app.get('/verify-email/:token', (req, res) => {
+  const u = db.get('SELECT id FROM users WHERE verify_token=?', req.params.token);
+  if (!u) return res.send(shell({ title: 'Verify', body: `<div class="auth"><h2>Link expired<em>.</em></h2><p class="sub">This verification link is invalid or already used.</p><a class="btn" href="/login">Sign in</a></div>` }));
+  db.run('UPDATE users SET email_verified=1, verify_token=NULL WHERE id=?', u.id);
+  res.send(shell({ title: 'Verified', body: `<div class="auth"><h2>Email verified<em>.</em></h2><p class="sub">Thanks — your email is confirmed.</p><a class="btn" href="/app">Go to dashboard</a></div>` }));
+});
+// Resend verification
+app.post('/resend-verification', requireAuth, (req, res) => {
+  if (!req.user.email_verified) {
+    const vtoken = crypto.randomBytes(24).toString('hex');
+    db.run('UPDATE users SET verify_token=? WHERE id=?', vtoken, req.user.id);
+    mail.sendEmail(req.user.email, 'verify-email', { name: (req.user.name || '').split(' ')[0], email: req.user.email, link: absUrl(req, '/verify-email/' + vtoken), brand: 'CALIBR', expires: '24 hours' }, 'verify-resend-' + req.user.id + '-' + Date.now()).catch(() => {});
+  }
+  res.redirect(homeFor(req.user.role) + '?v=sent');
 });
 
 app.get('/login', (req, res) => res.send(shell({ title: 'Sign in', body: `
@@ -178,6 +252,7 @@ app.get('/login', (req, res) => res.send(shell({ title: 'Sign in', body: `
   <form method="post" action="/login">
     <div class="fld"><label>Email</label><input type="email" name="email" required></div>
     <div class="fld"><label>Password</label><input type="password" name="pass" required></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:4px 0 14px"><input type="checkbox" name="remember" value="1" checked style="width:auto"> Keep me signed in for 30 days</label>
     <button class="btn" style="width:100%">Sign in</button>
   </form>
   <p style="margin-top:16px;font-size:13px;color:var(--grey)">New here? <a href="/signup" style="color:var(--pink);font-weight:700">Create an account</a></p>
@@ -188,6 +263,8 @@ app.post('/login', (req, res) => {
   if (!u || !bcrypt.compareSync(req.body.pass || '', u.pass)) return res.redirect('/login?e=' + encodeURIComponent('Wrong email or password.'));
   if (u.role !== 'admin' && isAdminEmail(u.email)) { db.run('UPDATE users SET role=? WHERE id=?', 'admin', u.id); u.role = 'admin'; }
   req.session.uid = u.id;
+  // Remember me — extend the session cookie to 30 days (default is 8h).
+  if (req.body.remember) req.session.cookie.maxAge = 1000 * 60 * 60 * 24 * 30;
   res.redirect(homeFor(u.role));
 });
 
@@ -221,12 +298,13 @@ app.get('/app', requireAuth, requireRole('seeker'), (req, res) => {
     ${score ? `<form method="post" action="/app/score" style="margin-top:8px"><button class="btn g sm">Re-generate Score</button></form>` : ''}
     <div class="lbl">Grow tools</div>
     <div class="actions">
-      <a class="btn sm" href="/app/cv">ATS Optimizer</a>
+      <a class="btn sm" href="/app/cv">ATS Optimiser</a>
       <a class="btn sm" href="/app/interview">Mock Interview</a>
       <a class="btn sm" href="/app/cover-letters">Cover Letters</a>
       <a class="btn sm" href="/app/growth">Growth Path</a>
       <a class="btn sm" href="/app/applications">My Applications</a>
       <a class="btn sm" href="/app/wellness">Wellness</a>
+      <a class="btn sm" href="/app/coaching">Coaching</a>
       <a class="btn sm" href="/app/billing">Billing</a>
       <a class="btn sm g" href="/app/setup">Setup guide</a>
       <a class="btn sm g" href="/jobs">Browse jobs</a>
@@ -239,15 +317,43 @@ app.get('/app', requireAuth, requireRole('seeker'), (req, res) => {
       if (recs.length) h += `<div class="lbl">Recommended jobs</div><div class="grid">${recs.map(r => `<div class="card"><h3 style="margin:0">${esc(r.title)}</h3><p>${esc(r.company)}${r.location ? ' · ' + esc(r.location) : ''}</p><a class="btn sm" href="/jobs/${r.public_token}">View &amp; apply</a></div>`).join('')}</div>`;
       return h;
     })()}
-    <div class="lbl">Profile · optional, POPIA-protected</div>
-    <form method="post" action="/app/profile">
+    <div class="lbl">Step 1 · Upload your CV &amp; credentials</div>
+    <div class="msg">Attach your CV and qualifications straight from your computer — PDF, Word or text. We'll instantly check it for gaps and quick wins. POPIA-protected; shared with employers only when you apply.</div>
+    ${(() => { const files = db.all("SELECT id, kind, filename, size FROM user_files WHERE user_id=? ORDER BY id DESC", req.user.id);
+      return files.length ? `<div class="table-wrap"><table><tr><th>File</th><th>Type</th><th></th></tr>${files.map(f => `<tr><td>${esc(f.filename || 'file')}</td><td>${f.kind === 'cv' ? 'CV' : 'Credential'}</td><td><a class="btn sm g" href="/app/files/${f.id}" target="_blank">Download</a> <form method="post" action="/app/files/${f.id}/delete" style="display:inline"><button class="btn sm g">Remove</button></form></td></tr>`).join('')}</table></div>` : ''; })()}
+    <form method="post" action="/app/profile" id="cvForm">
+      <div class="fld"><label>Your CV — attach a file</label><input type="file" id="cvFile" accept=".pdf,.doc,.docx,.txt,.rtf"><span class="sub" id="cvFileName"></span></div>
+      <div class="fld"><label>…or paste your CV text (used for your instant CV check &amp; ATS scoring)</label><textarea name="cv" id="cvText" placeholder="Paste your CV text here">${esc(req.user.cv || '')}</textarea></div>
+      <div class="fld"><label>Credentials — attach certificates / qualifications (you can pick several)</label><input type="file" id="credFiles" accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png" multiple><span class="sub" id="credNames"></span></div>
       <div class="fld inline">
         <div><label>Race (EE self-ID)</label><select name="ee_race"><option value="">Prefer not to say</option>${['African','Coloured','Indian','White','Other'].map(o => `<option${req.user.ee_race === o ? ' selected' : ''}>${o}</option>`).join('')}</select></div>
         <div><label>Gender (EE self-ID)</label><select name="ee_gender"><option value="">Prefer not to say</option>${['Female','Male','Other'].map(o => `<option${req.user.ee_gender === o ? ' selected' : ''}>${o}</option>`).join('')}</select></div>
       </div>
-      <div class="fld"><label>Your CV (paste text)</label><textarea name="cv" placeholder="Paste your CV so employers see it with your Score">${esc(req.user.cv || '')}</textarea></div>
-      <button class="btn sm">Save profile</button>
+      <input type="hidden" name="cv_file" id="cvFileData"><input type="hidden" name="cv_file_name" id="cvFileNameH"><input type="hidden" name="cv_file_mime" id="cvFileMime">
+      <input type="hidden" name="creds" id="credsData">
+      <button class="btn sm">Save &amp; check my CV</button>
     </form>
+    <script>(function(){
+      var MAX=8*1024*1024;
+      function b64(file){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(String(r.result).split(',')[1]||'');};r.onerror=rej;r.readAsDataURL(file);});}
+      function txt(file){return new Promise(function(res){var r=new FileReader();r.onload=function(){res(String(r.result||''));};r.readAsText(file);});}
+      var cvFile=document.getElementById('cvFile');
+      if(cvFile) cvFile.addEventListener('change', async function(){
+        var f=cvFile.files[0]; if(!f)return;
+        document.getElementById('cvFileName').textContent=' — '+f.name;
+        document.getElementById('cvFileData').value=await b64(f);
+        document.getElementById('cvFileNameH').value=f.name;
+        document.getElementById('cvFileMime').value=f.type||'application/octet-stream';
+        if(/\.txt$|\.rtf$/i.test(f.name) || (f.type||'').indexOf('text')===0){var t=await txt(f); if(t.trim()) document.getElementById('cvText').value=t.slice(0,20000);}
+      });
+      var credFiles=document.getElementById('credFiles');
+      if(credFiles) credFiles.addEventListener('change', async function(){
+        var arr=[],names=[];
+        for(var i=0;i<credFiles.files.length && i<8;i++){var f=credFiles.files[i]; if(f.size>MAX)continue; names.push(f.name); arr.push({name:f.name,mime:f.type||'application/octet-stream',data:await b64(f)});}
+        document.getElementById('credNames').textContent=names.length?' — '+names.join(', '):'';
+        document.getElementById('credsData').value=JSON.stringify(arr);
+      });
+    })();</script>
     <div class="lbl">Your assessments</div><div class="grid">${cards}</div>` }));
 });
 
@@ -258,7 +364,7 @@ app.get('/methodology', (req, res) => {
     <p class="sub">Why the CALIBR Score is built the way it is — and the research it stands on. Written plainly, with honest limits.</p>
 
     <div class="lbl">The principle</div>
-    <p>Decades of selection-science research converge on a clear finding: <b>structured, standardized, job-relevant assessment predicts on-the-job performance far better than unstructured interviews or CV screening</b> — and does so more fairly, because every candidate is measured on the same evidence. CALIBR is built around that finding.</p>
+    <p>Decades of selection-science research converge on a clear finding: <b>structured, standardised, job-relevant assessment predicts on-the-job performance far better than unstructured interviews or CV screening</b> — and does so more fairly, because every candidate is measured on the same evidence. CALIBR is built around that finding.</p>
 
     <div class="lbl">What each axis is grounded in</div>
     <div class="table-wrap"><table><tr><th>CALIBR axis</th><th>Research basis</th></tr>
@@ -266,14 +372,51 @@ app.get('/methodology', (req, res) => {
       <tr><td><b>Skills / Technical</b></td><td>Sampling job-relevant ability (the "work-sample" logic) is one of the highest-validity selection methods — you measure the thing the job actually needs.</td></tr>
       <tr><td><b>Integrity</b></td><td>Integrity tests add <em>incremental</em> validity over cognitive ability and predict counterproductive work behaviour (Ones, Viswesvaran &amp; Schmidt meta-analyses).</td></tr>
       <tr><td><b>Personality</b></td><td>Conscientiousness and related traits show consistent, if modest, links to performance (Barrick &amp; Mount).</td></tr>
-      <tr><td><b>Culture-Fit</b></td><td>Person–Organization fit — the congruence between a person's values and a <em>specific</em> organization's — relates to job satisfaction, commitment and retention (Kristof-Brown, Zimmerman &amp; Johnson meta-analysis, 2005). This is why CALIBR measures culture-fit <b>against your company's own profile, weighted by what you value</b> — not as a generic "culture score."</td></tr>
+      <tr><td><b>Culture-Fit</b></td><td>Person–Organisation fit — the congruence between a person's values and a <em>specific</em> organisation's — relates to job satisfaction, commitment and retention (Kristof-Brown, Zimmerman &amp; Johnson meta-analysis, 2005). This is why CALIBR measures culture-fit <b>against your company's own profile, weighted by what you value</b> — not as a generic "culture score."</td></tr>
     </table></div>
+
+    <div class="lbl">How the CALIBR Score is computed</div>
+    <p>The Score is a <b>weighted composite</b> of the five axes, expressed on a 0–100 scale. Each raw axis result is normalised to a common scale before weighting, so no single test's point-spread dominates. The default weighting is balanced, but <b>employers re-weight the axes per role</b> — a role that lives or dies on technical skill can lift Skills / Technical and lower, say, Culture-Fit — and the Score recomputes against that rubric. The candidate keeps <em>one</em> underlying evidence set; each employer sees it through their own lens.</p>
+    <ul class="flags">
+      <li><b>Server-issued &amp; versioned</b> — the Score is calculated and signed server-side, stamped with the rubric version used, and is not editable by the candidate or employer.</li>
+      <li><b>Publicly verifiable</b> — every issued Score has a tamper-evident verify link, so an employer can confirm a shared Score is genuine and unaltered.</li>
+      <li><b>Recomputed, not overwritten</b> — re-weighting for a role produces a new role-specific view; the candidate's canonical Score and history are preserved.</li>
+    </ul>
+
+    <div class="lbl">How each axis is measured</div>
+    <div class="table-wrap"><table><tr><th>Axis</th><th>What it measures</th><th>How it's assessed</th></tr>
+      <tr><td><b>Aptitude / Cognitive</b></td><td>Reasoning across numerical, verbal and logical domains; speed and accuracy of problem-solving.</td><td>Timed, standardised item sets; shuffled item order and focus-loss tracking to keep results fair and comparable.</td></tr>
+      <tr><td><b>Skills / Technical</b></td><td>Role-relevant ability — the actual competencies the job needs.</td><td>Work-sample-style items mapped to the role; complemented by the ATS optimiser's evidence from the CV against real job ads.</td></tr>
+      <tr><td><b>Personality</b></td><td>Work-style traits (conscientiousness and related), no right answers.</td><td>Self-report inventory; scored as tendencies, never as pass/fail.</td></tr>
+      <tr><td><b>Culture-Fit</b></td><td>Alignment between the candidate's work values and a <em>specific</em> company's stated values, across seven dimensions.</td><td>Scored at match time against the employer's own culture profile and weights — shown per dimension, so "fit" is transparent, not a euphemism.</td></tr>
+      <tr><td><b>Integrity</b></td><td>Reliability and honesty indicators; likelihood of counterproductive work behaviour.</td><td>Standardised integrity inventory; reported as a range, used as one signal among several.</td></tr>
+    </table></div>
+
+    <div class="lbl">Reliability &amp; how we read a Score</div>
+    <p>No assessment is perfect, so a Score is a <b>range, not a verdict</b>. Small gaps between candidates should be treated as ties. The Score narrows a field and structures the conversation; the interview and human judgement decide the hire. Higher-stakes decisions warrant more evidence, not less.</p>
 
     <div class="lbl">How we keep it fair</div>
     <ul class="flags">
-      <li><b>Structure &amp; standardization</b> — identical items and scoring for every candidate reduce interviewer bias.</li>
+      <li><b>Structure &amp; standardisation</b> — identical items and scoring for every candidate reduce interviewer bias.</li>
       <li><b>Company-relative culture-fit</b> — you define the target and its weights, and the score <em>shows its working</em> per dimension, so "fit" can't hide as a euphemism.</li>
       <li><b>SA law</b> — the Employment Equity Act (s8) requires that any assessment used for selection be <b>scientifically valid, reliable and applied fairly</b>; POPIA governs the candidate data. Our build plan includes reliability estimation, a predictive-validity study, and adverse-impact (four-fifths rule) analysis by an Industrial-Organisational specialist before the Score is used to <em>gate</em> a hire.</li>
+    </ul>
+
+    <div class="lbl">Data &amp; privacy (POPIA)</div>
+    <ul class="flags">
+      <li><b>Consent first</b> — assessment and profile data are processed on the candidate's explicit consent, captured at sign-up.</li>
+      <li><b>Minimisation &amp; purpose</b> — we collect what the Score needs and use it for that purpose; EE self-identification is optional and never affects the Score.</li>
+      <li><b>The candidate holds the key</b> — your CV and Score are shared with an employer only when <em>you</em> apply or share your verify link.</li>
+      <li><b>Right to access &amp; deletion</b> — candidates can see the data behind their Score and request correction or deletion, per POPIA.</li>
+    </ul>
+
+    <div class="lbl">Validation roadmap</div>
+    <p>Being honest about maturity matters more than a confident number. Before the Score is used to <em>gate</em> a hire, our plan is:</p>
+    <ul class="flags">
+      <li><b>Reliability estimation</b> — internal consistency and test–retest stability per axis on SA samples.</li>
+      <li><b>Criterion-validity study</b> — correlate Scores against on-the-job performance to confirm they predict what they claim, locally.</li>
+      <li><b>Adverse-impact analysis</b> — four-fifths (80%) rule checks across protected groups, reviewed by an Industrial-Organisational specialist, with items revised where impact isn't justified by the job.</li>
+      <li><b>Ongoing monitoring</b> — re-check drift as question banks and the population evolve.</li>
     </ul>
 
     <div class="callout" style="background:var(--paper2);border-left:3px solid var(--pink);padding:12px 14px">
@@ -331,11 +474,11 @@ app.get('/app/setup', requireAuth, requireRole('seeker'), (req, res) => {
   const hasScore = !!db.get('SELECT id FROM scores WHERE user_id=? LIMIT 1', req.user.id);
   const profileDone = !!(req.user.cv && req.user.cv.length > 40);
   const steps = [
-    { done: true, title: 'Account created', desc: `Welcome, ${esc((req.user.name || '').split(' ')[0])}.`, href: '/app', cta: 'Open dashboard', status: 'Done' },
-    { done: profileDone, title: 'Add your profile & CV', desc: 'Paste your CV and (optionally) your EE self-ID — POPIA-protected, only used with your consent.', href: '/app', cta: profileDone ? 'Update' : 'Add CV', status: profileDone ? 'Added' : 'Missing' },
+    { done: profileDone, title: 'Upload your CV & credentials', desc: 'Attach your CV and qualifications from your computer (or paste your CV). We instantly check it for gaps — POPIA-protected.', href: '/app', cta: profileDone ? 'Update & re-check' : 'Upload CV', status: profileDone ? 'Added' : 'Start here' },
+    { done: false, title: 'Find matching roles', desc: 'See the real South African jobs you actually fit, ranked to you.', href: '/jobs', cta: 'Browse jobs', status: 'Anytime' },
+    { done: false, title: 'Optimise your CV against a job', desc: 'Paste any job ad and see your match %, missing keywords and a tailored, ATS-safe rewrite.', href: '/app/cv', cta: 'Open ATS Optimiser', status: 'Anytime' },
     { done: doneN >= 6, title: 'Take the six assessments', desc: 'Aptitude, Technical, Cognitive, Personality, Culture-Fit and Integrity — taken once, reused everywhere.', href: '/app', cta: doneN >= 6 ? 'Review' : 'Take tests', status: doneN + '/6 done' },
     { done: hasScore, title: 'Generate your CALIBR Score', desc: 'Turn your assessments into one verified, shareable Score employers can trust.', href: '/app', cta: hasScore ? 'View Score' : 'Generate', status: hasScore ? 'Issued' : (doneN >= 6 ? 'Ready' : 'Do tests first') },
-    { done: false, title: 'Optimise your CV against a job', desc: 'Paste any job ad and see your match %, missing keywords and a tailored rewrite.', href: '/app/cv', cta: 'Open ATS Optimizer', status: 'Anytime' },
   ];
   res.send(shell({ title: 'Setup', user: req.user, body: setupPage('Welcome to CALIBR', 'A few steps to build your verified Score and start applying.', steps, '/app') }));
 });
@@ -391,6 +534,56 @@ app.post('/app/score', requireAuth, requireRole('seeker'), (req, res) => {
 
 app.post('/app/profile', requireAuth, requireRole('seeker'), (req, res) => {
   db.run('UPDATE users SET ee_race=?, ee_gender=?, cv=? WHERE id=?', req.body.ee_race || null, req.body.ee_gender || null, req.body.cv || null, req.user.id);
+  // Store an attached CV file (base64) if provided
+  const cvData = req.body.cv_file;
+  if (cvData && cvData.length) {
+    db.run('INSERT INTO user_files (user_id,kind,filename,mime,size,data,created_at) VALUES (?,?,?,?,?,?,?)',
+      req.user.id, 'cv', (req.body.cv_file_name || 'cv').slice(0, 200), (req.body.cv_file_mime || '').slice(0, 100), Math.round(cvData.length * 0.75), cvData, now());
+  }
+  // Store attached credential files (JSON array of {name,mime,data})
+  try {
+    const creds = JSON.parse(req.body.creds || '[]');
+    if (Array.isArray(creds)) creds.slice(0, 8).forEach(f => {
+      if (f && f.data) db.run('INSERT INTO user_files (user_id,kind,filename,mime,size,data,created_at) VALUES (?,?,?,?,?,?,?)',
+        req.user.id, 'credential', String(f.name || 'credential').slice(0, 200), String(f.mime || '').slice(0, 100), Math.round(String(f.data).length * 0.75), String(f.data), now());
+    });
+  } catch (e) { /* ignore malformed */ }
+  res.redirect('/app/cv-check');
+});
+// CV health-check — teaser of gaps + upsell to the paid rewrite / coaching
+app.get('/app/cv-check', requireAuth, requireRole('seeker'), (req, res) => {
+  const a = cvAudit(req.user.cv);
+  const hasKeys = paystack.hasKeys();
+  let body;
+  if (a.empty) {
+    body = `<h1>CV check<em>.</em></h1><p class="sub">Add your CV first and we'll check it instantly.</p><a class="btn" href="/app">Add my CV</a>`;
+  } else {
+    const shownGaps = a.gaps.slice(0, 2), lockedGaps = Math.max(0, a.gaps.length - 2);
+    body = `<h1>Your CV check<em>.</em></h1>
+      <p class="sub"><a href="/app" style="color:var(--pink);font-weight:700">&larr; Dashboard</a> · Instant, automated review of the CV you uploaded.</p>
+      ${matchBar(a.score)}
+      <p class="sub">${a.passed}/${a.total} essentials in place · ${a.words} words.</p>
+      ${a.gaps.length ? `<div class="lbl">What's holding your CV back (${a.gaps.length})</div>
+        <ul class="flags">${shownGaps.map(g => `<li><b>${esc(g)}</b></li>`).join('')}${lockedGaps ? `<li style="opacity:.7">🔒 +${lockedGaps} more gap${lockedGaps > 1 ? 's' : ''} — unlock the full breakdown below</li>` : ''}</ul>` : '<div class="msg">Strong CV — all our essentials are covered. Now tailor it to each job below.</div>'}
+      <div class="lbl">Fix it — and go further</div>
+      <div class="grid">
+        <div class="card"><h3>ATS Optimiser<em>.</em></h3><p>Score your CV against a specific job ad, see the exact missing keywords, and get a tailored, ATS-safe rewrite.</p><a class="btn sm block" href="/app/cv">Optimise for a job</a></div>
+        <div class="card"><h3>Career coach<em>.</em></h3><p>A 60-minute 1-on-1 to rebuild your CV and plan your next move with a real coach.</p><a class="btn sm block" href="/app/coaching/career">Book · R${(coachByKey('career')||{}).price||450}</a></div>
+        <div class="card"><h3>Unlock everything<em>.</em></h3><p>Every fix, rewrite and tool on one plan — from R199/mo, in Rand.</p><a class="btn sm block ${hasKeys ? '' : 'g'}" href="/app/billing">See plans</a></div>
+      </div>`;
+  }
+  res.send(shell({ title: 'CV check', user: req.user, body }));
+});
+// Serve / delete an uploaded file (owner only)
+app.get('/app/files/:id', requireAuth, (req, res) => {
+  const f = db.get('SELECT * FROM user_files WHERE id=? AND user_id=?', req.params.id, req.user.id);
+  if (!f || !f.data) return res.status(404).send('Not found');
+  res.setHeader('Content-Type', f.mime || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `inline; filename="${(f.filename || 'file').replace(/[^\w.\- ]/g, '_')}"`);
+  res.send(Buffer.from(f.data, 'base64'));
+});
+app.post('/app/files/:id/delete', requireAuth, (req, res) => {
+  db.run('DELETE FROM user_files WHERE id=? AND user_id=?', req.params.id, req.user.id);
   res.redirect('/app');
 });
 
@@ -401,8 +594,8 @@ function matchBar(pct) {
 }
 app.get('/app/cv', requireAuth, requireRole('seeker'), (req, res) => {
   const engines = Object.keys(ats.ATS_ENGINES);
-  res.send(shell({ title: 'ATS Optimizer', user: req.user, body: `
-    <h1>ATS Optimizer<em>.</em></h1><p class="sub">Paste your CV <b>and the actual job ad</b>. CALIBR scores your match, shows the exact keywords you're missing, flags what breaks the ATS, then rewrites your CV against that job — truthfully.</p>
+  res.send(shell({ title: 'ATS Optimiser', user: req.user, body: `
+    <h1>ATS Optimiser<em>.</em></h1><p class="sub">Paste your CV <b>and the actual job ad</b>. CALIBR scores your match, shows the exact keywords you're missing, flags what breaks the ATS, then rewrites your CV against that job — truthfully.</p>
     ${llm.hasKey() ? `<div class="msg">AI rewrite ready · ${esc(llm.provider())}. Match scoring &amp; keyword gaps work with or without AI.</div>` : '<div class="msg">Match scoring, keyword gaps and parse-safety work now. Add <b>ANTHROPIC_API_KEY</b> to <b>app/.env</b> to also get the AI rewrite.</div>'}
     <form method="post" action="/app/cv">
       <div class="fld inline">
@@ -743,6 +936,7 @@ app.get('/company', requireAuth, requireRole('employer'), (req, res) => {
   const connCount = distribute.PARTNERS.filter(p => connMap[p.key] && connMap[p.key].status === 'connected').length;
   res.send(shell({ title: 'Company', user: req.user, body: `
     <h1>${esc(co.name)}<em>.</em></h1><p class="sub">Hire on evidence. Screen the pre-scored CALIBR talent pool. · <a href="/company/setup" style="color:var(--pink);font-weight:700">Setup guide</a></p>
+    <div class="card" style="border:2px solid var(--pink);margin-bottom:16px"><h3>✦ Sightline — the agent suite</h3><p>Seven AI agents across the full hiring lifecycle: SCAN · FOCUS · SIGNAL · ALIGN · GAUGE · LOCK · LAUNCH. One clear line from candidate to hire.</p><a class="btn sm" href="/company/agents">Open Sightline</a></div>
     <div class="grid">
       <div class="card"><h3>Talent pool</h3><p>Candidates with a verified CALIBR Score</p><div class="score-num" style="font-size:44px">${poolSize}</div><a class="btn sm" href="/company/pool">Browse pool</a></div>
       <div class="card"><h3>Post a role</h3><p>Write the JD, screen the pool, auto-distribute to job boards, and take applications with JD-scored CVs.</p><a class="btn sm block" href="/company/post">Post a job</a> <a class="btn sm block g" href="/company/jd">✦ AI JD writer</a></div>
@@ -753,6 +947,7 @@ app.get('/company', requireAuth, requireRole('employer'), (req, res) => {
       <div class="card"><h3>Culture profile</h3><p>${cultureSet ? 'Defined — scoring is company-relative' : 'Define what your company values'}</p><a class="btn sm ${cultureSet ? 'g' : ''}" href="/company/culture">${cultureSet ? 'Edit profile' : 'Set up profile'}</a></div>
       <div class="card"><h3>Connections</h3><p>${connCount ? connCount + ' of ' + distribute.PARTNERS.length + ' job platforms connected' : 'Connect the job boards you use'}</p><a class="btn sm ${connCount ? 'g' : ''}" href="/company/connections">Manage connections</a></div>
       <div class="card"><h3>API &amp; webhooks</h3><p>Integrate CALIBR with your HRIS &amp; tools</p><a class="btn sm g" href="/company/api">Manage API</a></div>
+      <div class="card"><h3>Coaching</h3><p>1-on-1 sessions for your team — leadership, hiring &amp; interviewing skill</p><a class="btn sm g" href="/app/coaching">Book coaching</a></div>
       <div class="card"><h3>Billing</h3><p>Flat monthly subscription — from R1,499/mo</p><a class="btn sm g" href="/company/billing">View plans</a></div>
     </div>
     <div class="lbl">Open roles</div>
@@ -1115,17 +1310,71 @@ app.get('/company/pool', requireAuth, requireRole('employer'), (req, res) => {
 
 // ---------- WELLNESS (non-clinical) ----------
 const CRISIS = [
-  ['SADAG Mental Health Line', '0800 567 567', 'or SMS 31393 · 24/7'],
-  ['SADAG Suicide Crisis Line', '0800 567 567', '24/7'],
+  ['SADAG Mental Health Helpline', '0800 456 789', 'or SMS 31393 · 24/7'],
+  ['SADAG Suicide Crisis Helpline', '0800 567 567', '24/7'],
   ['Lifeline South Africa', '0861 322 322', '24/7'],
   ['Emergency', '112 / 10111', 'immediate danger'],
 ];
+// Coaching options shown on the Wellness page.
+// For each, set `wa` to the coach's WhatsApp number in full international format,
+// digits only (e.g. '27821234567'). Leave `wa` as '' to hide that option's button
+// until a number is supplied. Add or remove entries freely.
+const COACHES = [
+  { key: 'wellness', label: 'Wellness & fitness', price: 350, desc: 'Movement, stress and energy — a wellness coach or personal trainer to keep you steady through the search.', wa: '', msg: "Hi — I'm on CALIBR and I'd like to chat about wellness coaching / personal training." },
+  { key: 'career', label: 'Career coach', price: 450, desc: 'CV, interviews and a clear plan to land the right role, faster.', wa: '', msg: "Hi — I'm on CALIBR and I'd like career coaching (CV, interviews, job strategy)." },
+  { key: 'professional', label: 'Professional & executive', price: 750, desc: 'Leadership, workplace growth and your next-step strategy.', wa: '', msg: "Hi — I'm on CALIBR and I'd like professional / executive coaching." },
+  { key: 'interview', label: 'Interview coach', price: 500, desc: 'Focused mock-interview prep and delivery with a real coach — beyond the AI practice.', wa: '', msg: "Hi — I'm on CALIBR and I'd like interview coaching (mock interviews and delivery)." },
+  { key: 'financial', label: 'Financial / money coach', price: 450, desc: 'Budgeting, debt and managing money while between jobs or on a first salary.', wa: '', msg: "Hi — I'm on CALIBR and I'd like financial / money coaching." },
+  { key: 'study', label: 'Study / skills coach', price: 350, desc: 'Upskilling, certifications and study planning to close the gaps your Score reveals.', wa: '', msg: "Hi — I'm on CALIBR and I'd like study / skills coaching (upskilling and certifications)." },
+  { key: 'life', label: 'Life coach', price: 450, desc: 'Direction, confidence and goal-setting alongside the job search.', wa: '', msg: "Hi — I'm on CALIBR and I'd like life coaching (direction, confidence, goals)." },
+];
+// Consult time slots offered on the booking page (local SA time).
+const COACH_SLOTS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+const coachByKey = k => COACHES.find(c => c.key === k) || null;
+
+// Deterministic CV health-check — surfaces gaps + fixes from the CV text (no API key needed).
+function cvAudit(cv) {
+  const text = (cv || '').trim();
+  if (!text) return { empty: true, score: 0, gaps: [], fixes: [], passed: 0, total: 7, words: 0 };
+  const lower = text.toLowerCase();
+  const words = text.split(/\s+/).length;
+  const checks = [
+    { ok: /\b[\w.+-]+@[\w-]+\.[\w.-]+\b/.test(text) && /\+?\d[\d\s()-]{7,}/.test(text), gap: 'No clear email + phone at the top', fix: 'Add your email and a South African mobile number in the header so employers — and the ATS — can reach you.' },
+    { ok: words >= 200 && words <= 900, gap: words < 200 ? 'Your CV looks too short' : 'Your CV looks too long', fix: words < 200 ? 'Aim for 1–2 pages: expand each role with specific, measurable achievements.' : 'Trim to 1–2 pages — keep the last ~10 years and cut older detail.' },
+    { ok: /(\d+\s?%|r\s?\d|\d{3,}|\bmillion\b|\bthousand\b|\bx\b)/i.test(text), gap: 'Few quantified results', fix: 'Turn duties into numbers — "cut reporting time 40%", "managed an R2m budget", "grew sales 3×".' },
+    { ok: /summary|profile|objective/i.test(lower.slice(0, 500)), gap: 'No professional summary up top', fix: 'Add a 2–3 line summary naming your role, years of experience and top strengths.' },
+    { ok: /skills|competenc|proficien|technical/i.test(lower), gap: 'No dedicated skills section', fix: 'Add a Skills section listing the exact tools and keywords from the jobs you want.' },
+    { ok: /(19|20)\d{2}/.test(text), gap: 'No dates on your experience', fix: 'Add start–end dates (month & year) for each role so your tenure is clear.' },
+    { ok: /\b(led|built|delivered|managed|improved|created|drove|launched|reduced|increased|achieved|designed)\b/i.test(lower), gap: 'Weak, passive wording', fix: 'Start each bullet with a strong action verb: Led, Built, Delivered, Reduced…' },
+  ];
+  const failed = checks.filter(c => !c.ok);
+  return { empty: false, score: Math.round(((checks.length - failed.length) / checks.length) * 100), words, gaps: failed.map(c => c.gap), fixes: failed.map(c => c.fix), passed: checks.length - failed.length, total: checks.length };
+}
 app.get('/app/wellness', requireAuth, requireRole('seeker'), (req, res) => {
   const hist = db.all('SELECT * FROM wellness_checkins WHERE user_id=? ORDER BY id DESC LIMIT 10', req.user.id);
   const avg = hist.length ? Math.round(hist.reduce((t, h) => t + (h.mood || 0), 0) / hist.length * 10) / 10 : null;
-  res.send(shell({ title: 'Wellness', user: req.user, body: `
+  const savg = hist.length ? Math.round(hist.reduce((t, h) => t + (h.stress || 0), 0) / hist.length * 10) / 10 : null;
+  const chrono = hist.slice().reverse();
+  const spark = (key, color) => {
+    if (chrono.length < 2) return '';
+    const W = 320, H = 56, pad = 6, step = (W - pad * 2) / (chrono.length - 1);
+    const y = v => (H - pad - ((Math.min(5, Math.max(1, v || 1)) - 1) / 4) * (H - pad * 2));
+    const pts = chrono.map((h, i) => `${(pad + i * step).toFixed(1)},${y(h[key]).toFixed(1)}`);
+    const dots = chrono.map((h, i) => `<circle cx="${(pad + i * step).toFixed(1)}" cy="${y(h[key]).toFixed(1)}" r="2.6" fill="${color}"/>`).join('');
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" style="max-width:340px;display:block"><polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dots}</svg>`;
+  };
+  const wellHead = `<style>
+    .breath{position:relative;width:170px;height:170px;margin:16px auto;display:flex;align-items:center;justify-content:center}
+    .breath .ring{position:absolute;inset:0;border-radius:50%;border:3px solid var(--pink);background:rgba(255,31,112,.08);transform:scale(.55)}
+    .breath.run .ring{animation:breathe 16s ease-in-out infinite}
+    .breath .t{position:relative;z-index:2;font-weight:800;font-size:15px;color:var(--ink)}
+    @keyframes breathe{0%{transform:scale(.55)}25%{transform:scale(1)}50%{transform:scale(1)}75%{transform:scale(.55)}100%{transform:scale(.55)}}
+    @media(prefers-reduced-motion:reduce){.breath.run .ring{animation:none;transform:scale(.8)}}
+  </style>`;
+  res.send(shell({ title: 'Wellness', user: req.user, head: wellHead, body: `
     <h1>Wellness<em>.</em></h1>
-    <div class="msg" style="border-left-color:#c33"><b>Not a clinical or medical service.</b> CALIBR Wellness is a light self-check to support you during your job search — it is not counselling, diagnosis or treatment. If you are struggling or in crisis, please reach out to a professional now:</div>
+    <p class="sub">A private, non-clinical space to check in on yourself, reset when it gets heavy, and keep momentum — whether you're job-hunting or growing in the role you're in. Nothing here is shared with employers.</p>
+    <div class="msg" style="border-left-color:#c33"><b>Not a clinical or medical service.</b> CALIBR Wellness is a light self-check to support you through your job search and career — it is not counselling, diagnosis or treatment. If you are struggling or in crisis, please reach out to a professional now:</div>
     <div class="table-wrap"><table><tr><th>Line</th><th>Number</th><th></th></tr>${CRISIS.map(c => `<tr><td><b>${esc(c[0])}</b></td><td><b style="color:var(--pink)">${esc(c[1])}</b></td><td>${esc(c[2])}</td></tr>`).join('')}</table></div>
     <div class="lbl">Quick check-in</div>
     <form method="post" action="/app/wellness">
@@ -1136,21 +1385,132 @@ app.get('/app/wellness', requireAuth, requireRole('seeker'), (req, res) => {
       <div class="fld"><label>Anything on your mind? (optional, private to you)</label><textarea name="note" style="min-height:90px"></textarea></div>
       <button class="btn">Save check-in</button>
     </form>
-    ${avg != null ? `<div class="lbl">Your recent mood average: ${avg}/5</div>` : ''}
+    ${chrono.length >= 2 ? `
+      <div class="lbl">Your trend · last ${chrono.length} check-ins</div>
+      <div class="grid">
+        <div class="card"><div style="font-weight:800;font-size:13px;margin-bottom:8px">Mood · avg <span style="color:var(--pink)">${avg}/5</span></div>${spark('mood', 'var(--pink)')}</div>
+        <div class="card"><div style="font-weight:800;font-size:13px;margin-bottom:8px">Stress · avg ${savg}/5</div>${spark('stress', 'var(--ink)')}</div>
+      </div>` : (avg != null ? `<div class="lbl">Your recent mood average: ${avg}/5</div>` : '')}
     ${hist.length ? `<div class="table-wrap"><table><tr><th>Date</th><th>Mood</th><th>Stress</th><th>Note</th></tr>${hist.map(h => `<tr><td>${esc((h.created_at || '').slice(0, 10))}</td><td>${h.mood || '—'}</td><td>${h.stress || '—'}</td><td>${esc((h.note || '').slice(0, 80))}</td></tr>`).join('')}</table></div>` : ''}
-    <div class="lbl">Looking after yourself while job-hunting</div>
+    <div class="lbl">Reset in a minute</div>
+    <div class="grid">
+      <div class="card">
+        <div style="font-weight:800;font-size:13px">Box breathing</div>
+        <p class="sub" style="margin:4px 0 0">In 4 · hold 4 · out 4 · hold 4. A simple way to calm your nervous system before an interview.</p>
+        <div class="breath" id="breathBox"><div class="ring"></div><span class="t" id="breathTxt">Press start</span></div>
+        <button class="btn sm" type="button" id="breathBtn">Start</button>
+      </div>
+      <details class="card">
+        <summary style="cursor:pointer;font-weight:800;font-size:13px">Feeling overwhelmed? Try 5-4-3-2-1 grounding</summary>
+        <ul class="flags" style="margin-top:12px">
+          <li><b>5</b> things you can see</li>
+          <li><b>4</b> things you can feel</li>
+          <li><b>3</b> things you can hear</li>
+          <li><b>2</b> things you can smell</li>
+          <li><b>1</b> thing you can taste</li>
+        </ul>
+        <p class="sub" style="margin-top:8px">Name each one slowly — it pulls your attention back to the present.</p>
+      </details>
+    </div>
+    <div class="lbl">Looking after yourself</div>
     <ul class="flags">
-      <li>Job searching is hard and rejection isn't a measure of your worth — pace yourself.</li>
-      <li>Set a small daily goal (e.g. 2 quality applications) instead of endless scrolling.</li>
-      <li>Keep a routine: sleep, movement and one thing that isn't about the search.</li>
+      <li>Job hunting and career-building are both hard — rejection and setbacks aren't a measure of your worth. Pace yourself.</li>
+      <li>Set a small daily goal (e.g. 2 quality applications, or 30 minutes of upskilling) instead of endless scrolling.</li>
+      <li>Keep a routine: sleep, movement and one thing that isn't about work.</li>
       <li>Talk to someone you trust; reach out to the lines above if it gets heavy.</li>
-    </ul>` }));
+    </ul>
+    <div class="lbl" id="coaching">1-on-1 coaching</div>
+    <div class="msg">Go further with a vetted coach — a private 60-minute session, matched to you. Whether you're job-hunting or developing your career, pick a coach, choose a time that suits you, and pay only once your session is confirmed.</div>
+    <div class="grid">${COACHES.map(c => `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><span style="font-weight:800;font-size:13px">${esc(c.label)}</span><span style="font-weight:900;color:var(--pink)">R${c.price}</span></div>
+        <p class="sub" style="margin:4px 0 12px">${esc(c.desc)}</p>
+        <a class="btn sm block" href="/app/coaching/${esc(c.key)}">Book a session</a>
+      </div>`).join('')}</div>
+    <p class="sub" style="margin-top:10px">Per 60-minute session, in Rand. Your booking is a request — you'll confirm a time and pay only when the session is locked in. <a href="/app/coaching" style="color:var(--pink);font-weight:700">My coaching sessions →</a></p>
+    <script>(function(){
+      var box=document.getElementById('breathBox'),btn=document.getElementById('breathBtn'),txt=document.getElementById('breathTxt');
+      if(!box||!btn)return;var phases=['Breathe in','Hold','Breathe out','Hold'],i=0,timer=null,on=false;
+      function tick(){txt.textContent=phases[i];i=(i+1)%4;}
+      btn.addEventListener('click',function(){on=!on;if(on){box.classList.add('run');btn.textContent='Stop';i=0;tick();timer=setInterval(tick,4000);}else{box.classList.remove('run');btn.textContent='Start';clearInterval(timer);txt.textContent='Press start';}});
+    })();</script>` }));
 });
 app.post('/app/wellness', requireAuth, requireRole('seeker'), (req, res) => {
   const m = Math.min(5, Math.max(1, parseInt(req.body.mood, 10) || 3));
   const s = Math.min(5, Math.max(1, parseInt(req.body.stress, 10) || 3));
   db.run('INSERT INTO wellness_checkins (user_id,mood,stress,note,created_at) VALUES (?,?,?,?,?)', req.user.id, m, s, (req.body.note || '').slice(0, 1000) || null, now());
   res.redirect('/app/wellness');
+});
+
+// ---------- COACHING (book a paid 1-on-1; pay on confirmation) ----------
+const bStatus = s => {
+  const map = { requested: ['Awaiting confirmation', '#000'], confirmed: ['Confirmed — pay to lock in', 'var(--pink)'], paid: ['Booked & paid', '#0a0'], cancelled: ['Cancelled', '#c33'] };
+  const [t, col] = map[s] || [s, '#000'];
+  return `<span class="pill" style="border-color:${col};color:${col}">${esc(t)}</span>`;
+};
+app.get('/app/coaching', requireAuth, requireRole('seeker', 'employer'), (req, res) => {
+  const mine = db.all('SELECT * FROM coaching_bookings WHERE user_id=? ORDER BY id DESC', req.user.id);
+  const rows = mine.map(b => `<tr>
+      <td><b>${esc(b.coach_label || b.coach_key)}</b></td>
+      <td>${esc(b.slot_date || '—')}${b.slot_time ? ' · ' + esc(b.slot_time) : ''}</td>
+      <td><b style="color:var(--pink)">R${b.amount}</b></td>
+      <td>${bStatus(b.status)}</td>
+      <td>${b.status === 'confirmed' ? `<form method="post" action="/app/coaching/${b.id}/pay" style="display:inline"><button class="btn sm"${paystack.hasKeys() ? '' : ' disabled title="Payments not switched on"'}>Pay R${b.amount}</button></form>` : (b.status === 'requested' ? `<form method="post" action="/app/coaching/${b.id}/cancel" style="display:inline"><button class="btn sm g">Cancel</button></form>` : '')}</td>
+    </tr>`).join('');
+  res.send(shell({ title: 'Coaching', user: req.user, body: `
+    <h1>Coaching<em>.</em></h1>
+    <p class="sub">Private 1-on-1 sessions with vetted coaches — for landing a role and for growing in your career. Book a time that suits you; pay only once your session is confirmed.</p>
+    <div class="lbl">Book a session</div>
+    <div class="grid">${COACHES.map(c => `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><span style="font-weight:800;font-size:13px">${esc(c.label)}</span><span style="font-weight:900;color:var(--pink)">R${c.price}</span></div>
+        <p class="sub" style="margin:4px 0 12px">${esc(c.desc)}</p>
+        <a class="btn sm block" href="/app/coaching/${esc(c.key)}">Choose a time</a>
+      </div>`).join('')}</div>
+    <div class="lbl">My sessions</div>
+    ${mine.length ? `<div class="table-wrap"><table><tr><th>Coach</th><th>Time</th><th>Fee</th><th>Status</th><th></th></tr>${rows}</table></div>` : '<div class="msg">No sessions yet — book one above.</div>'}` }));
+});
+app.get('/app/coaching/:key', requireAuth, requireRole('seeker', 'employer'), (req, res) => {
+  const c = coachByKey(req.params.key); if (!c) return res.redirect('/app/coaching');
+  const today = new Date().toISOString().slice(0, 10);
+  res.send(shell({ title: 'Book ' + c.label, user: req.user, body: `
+    <h1>${esc(c.label)}<em>.</em></h1>
+    <p class="sub">${esc(c.desc)}</p>
+    <div class="msg">Private 60-minute session · <b style="color:var(--pink)">R${c.price}</b>. Choose a date and a time that suits you. This sends a request — you'll pay <b>only once a coach confirms</b> your slot.</div>
+    <form method="post" action="/app/coaching/${esc(c.key)}/book">
+      <div class="fld inline">
+        <div style="flex:1"><label>Preferred date</label><input type="date" name="slot_date" min="${today}" required></div>
+        <div style="flex:1"><label>Preferred time (SA)</label><select name="slot_time" required>${COACH_SLOTS.map(t => `<option value="${t}">${t}</option>`).join('')}</select></div>
+      </div>
+      <div class="fld"><label>What would you like to focus on? (optional)</label><textarea name="note" style="min-height:90px" placeholder="e.g. preparing for a specific interview, salary negotiation, study plan…"></textarea></div>
+      <button class="btn">Request this session</button>
+      <a class="btn g" href="/app/coaching">Back</a>
+    </form>` }));
+});
+app.post('/app/coaching/:key/book', requireAuth, requireRole('seeker', 'employer'), (req, res) => {
+  const c = coachByKey(req.params.key); if (!c) return res.redirect('/app/coaching');
+  const date = (req.body.slot_date || '').slice(0, 10);
+  const time = COACH_SLOTS.includes(req.body.slot_time) ? req.body.slot_time : '';
+  if (!date || !time) return res.redirect('/app/coaching/' + c.key);
+  db.run('INSERT INTO coaching_bookings (user_id,coach_key,coach_label,amount,slot_date,slot_time,note,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+    req.user.id, c.key, c.label, c.price, date, time, (req.body.note || '').slice(0, 1000) || null, 'requested', now());
+  res.redirect('/app/coaching');
+});
+app.post('/app/coaching/:id/cancel', requireAuth, requireRole('seeker', 'employer'), (req, res) => {
+  db.run("UPDATE coaching_bookings SET status='cancelled' WHERE id=? AND user_id=? AND status='requested'", req.params.id, req.user.id);
+  res.redirect('/app/coaching');
+});
+app.post('/app/coaching/:id/pay', requireAuth, requireRole('seeker', 'employer'), async (req, res) => {
+  const b = db.get('SELECT * FROM coaching_bookings WHERE id=? AND user_id=?', req.params.id, req.user.id);
+  if (!b || b.status !== 'confirmed') return res.redirect('/app/coaching');
+  if (!paystack.hasKeys()) return res.redirect('/app/coaching');
+  const reference = paystack.ref('coach');
+  db.run('UPDATE coaching_bookings SET reference=? WHERE id=?', reference, b.id);
+  db.run('INSERT INTO payments (user_id,kind,plan,amount,reference,status,created_at) VALUES (?,?,?,?,?,?,?)', req.user.id, 'coaching', b.coach_key, b.amount, reference, 'pending', now());
+  try {
+    const t = await paystack.initTransaction({ email: req.user.email, amount: b.amount, reference, callback_url: absUrl(req, '/billing/callback'), metadata: { user_id: req.user.id, kind: 'coaching', booking_id: b.id } });
+    res.redirect(t.authorization_url);
+  } catch (e) { res.send(shell({ title: 'Coaching', user: req.user, body: `<h1>Payment failed<em>.</em></h1><p class="sub">${esc(e.message)}</p><a class="btn g" href="/app/coaching">Back</a>` })); }
 });
 
 // ---------- BILLING (Paystack) ----------
@@ -1219,6 +1579,7 @@ function applyPayment(reference) {
   if (p.kind === 'subscription' && p.user_id) db.run('UPDATE users SET plan=?, plan_since=? WHERE id=?', p.plan, now(), p.user_id);
   if (p.kind === 'subscription' && p.company_id) db.run('UPDATE companies SET plan=? WHERE id=?', p.plan, p.company_id);
   if (p.kind === 'success_fee' && p.company_id) db.run('UPDATE fee_events SET status=? WHERE company_id=? AND status=?', 'paid', p.company_id, 'owing');
+  if (p.kind === 'coaching' && p.reference) db.run('UPDATE coaching_bookings SET status=? WHERE reference=?', 'paid', p.reference);
 }
 // Paystack webhook (raw body for signature verification)
 app.post('/paystack/webhook', express.raw({ type: 'application/json' }), (req, res) => {
@@ -1301,7 +1662,7 @@ app.get('/admin', requireAuth, requireRole('admin'), (req, res) => {
     </div>
     <div class="lbl">Revenue (subscriptions)</div>
     <div class="price-strip"><div><div class="p">R${Number(subPaid).toLocaleString('en-US')}</div><div class="l">Collected</div></div><div><div class="p">R${Number(subPending).toLocaleString('en-US')}</div><div class="l">Pending</div></div></div>
-    <div class="actions"><a class="btn sm" href="/admin/users">Users</a> <a class="btn sm" href="/admin/companies">Companies</a> <a class="btn sm" href="/admin/partners">Partners</a> <a class="btn sm g" href="/admin/payments">Payments</a></div>
+    <div class="actions"><a class="btn sm" href="/admin/users">Users</a> <a class="btn sm" href="/admin/companies">Companies</a> <a class="btn sm" href="/admin/partners">Partners</a> <a class="btn sm" href="/admin/coaching">Coaching</a> <a class="btn sm g" href="/admin/payments">Payments</a></div>
     <div class="lbl">Recent payments</div>
     ${pays.length ? `<div class="table-wrap"><table><tr><th>Ref</th><th>Kind</th><th>Amount</th><th>Status</th><th>Date</th></tr>${pays.map(p => `<tr><td>${esc(p.reference)}</td><td>${esc(p.kind)}${p.plan ? ' · ' + esc(p.plan) : ''}</td><td>R${Number(p.amount).toLocaleString('en-US')}</td><td><span class="pill ${p.status === 'paid' ? 'done' : 'todo'}">${esc(p.status)}</span></td><td>${esc((p.created_at || '').slice(0, 10))}</td></tr>`).join('')}</table></div>` : '<p class="sub">No payments yet.</p>'}` }));
 });
@@ -1320,6 +1681,22 @@ app.get('/admin/partners', requireAuth, requireRole('admin'), (req, res) => {
   res.send(shell({ title: 'Admin · Partners', user: req.user, body: `<h1>Partners<em>.</em></h1><p class="sub"><a href="/admin" style="color:var(--pink);font-weight:700">&larr; Admin</a></p>
     ${parts.length ? `<div class="table-wrap"><table><tr><th>Partner</th><th>Code</th><th>Referred</th><th>Pending commission</th></tr>${parts.map(p => { const s = partnerStats(p.id); return `<tr><td><b>${esc(p.name)}</b><br><span class="sub">${esc(p.email)}</span></td><td>${esc(p.referral_code || '—')}</td><td>${s.cos.length}</td><td>R${s.commissionPending.toLocaleString('en-US')}</td></tr>`; }).join('')}</table></div>` : '<p class="sub">No partners yet.</p>'}` }));
 });
+app.get('/admin/coaching', requireAuth, requireRole('admin'), (req, res) => {
+  const rows = db.all('SELECT b.*, u.name uname, u.email uemail FROM coaching_bookings b JOIN users u ON u.id=b.user_id ORDER BY b.id DESC LIMIT 300');
+  res.send(shell({ title: 'Admin · Coaching', user: req.user, body: `<h1>Coaching bookings<em>.</em></h1><p class="sub"><a href="/admin" style="color:var(--pink);font-weight:700">&larr; Admin</a> · Confirm a request to let the client pay for it.</p>
+    ${rows.length ? `<div class="table-wrap"><table><tr><th>Client</th><th>Coach</th><th>Requested time</th><th>Fee</th><th>Status</th><th></th></tr>${rows.map(b => `<tr>
+      <td><b>${esc(b.uname)}</b><br><span class="sub">${esc(b.uemail)}</span></td>
+      <td>${esc(b.coach_label || b.coach_key)}</td>
+      <td>${esc(b.slot_date || '—')}${b.slot_time ? ' · ' + esc(b.slot_time) : ''}${b.note ? `<br><span class="sub">${esc(b.note.slice(0, 80))}</span>` : ''}</td>
+      <td>R${b.amount}</td>
+      <td><span class="pill ${b.status === 'paid' ? 'done' : 'todo'}">${esc(b.status)}</span></td>
+      <td>${b.status === 'requested' ? `<form method="post" action="/admin/coaching/${b.id}/confirm" style="display:inline"><button class="btn sm">Confirm</button></form>` : ''}</td>
+    </tr>`).join('')}</table></div>` : '<p class="sub">No coaching bookings yet.</p>'}` }));
+});
+app.post('/admin/coaching/:id/confirm', requireAuth, requireRole('admin'), (req, res) => {
+  db.run("UPDATE coaching_bookings SET status='confirmed' WHERE id=? AND status='requested'", req.params.id);
+  res.redirect('/admin/coaching');
+});
 app.get('/admin/payments', requireAuth, requireRole('admin'), (req, res) => {
   const rows = db.all('SELECT * FROM payments ORDER BY id DESC LIMIT 300');
   res.send(shell({ title: 'Admin · Payments', user: req.user, body: `<h1>Payments<em>.</em></h1><p class="sub"><a href="/admin" style="color:var(--pink);font-weight:700">&larr; Admin</a></p>
@@ -1331,6 +1708,7 @@ hiring = require('./hiring')({ app, db, shell, esc, now, requireAuth, requireRol
 require('./intelligence')({ app, db, shell, esc, now, requireAuth, requireRole, ai: require('./ai') });
 collab = require('./collab')({ app, db, shell, esc, now, requireAuth, requireRole });
 webhooks = require('./publicapi')({ app, db, shell, esc, now, requireAuth, requireRole });
+require('./agents')({ app, db, shell, esc, now, requireAuth, requireRole, STAGES, notify, ai: require('./ai'), ats, BANK, AXES, fitFor, companyProfile, cultureWeightsOf, cultureRawMap, axesWithCulture, roleKeywords, reindexRole });
 
 // Listen only when run directly (local dev / Render / Fly / any container). On Vercel the app is
 // imported by api/index.js as a serverless handler, so it must be exported and must NOT call listen.

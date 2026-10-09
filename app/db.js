@@ -8,8 +8,7 @@ const fs = require('fs');
 //    durable data lives in the cloud and the app needs NO persistent disk. Runs on any Node host.
 //    Uses the `libsql` driver (better-sqlite3-compatible, synchronous). Read-your-writes is on by default.
 //  • DEFAULT: Node's built-in node:sqlite on a local file (DB_PATH) — for local dev and disk-backed hosts.
-// On Vercel only /tmp is writable, so the local SQLite replica lives there (Turso holds the durable copy).
-const DB_PATH = process.env.DB_PATH || (process.env.VERCEL ? '/tmp/calibr.db' : path.join(__dirname, 'db', 'calibr.db'));
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'calibr.db');
 try { fs.mkdirSync(path.dirname(DB_PATH), { recursive: true }); } catch (e) {}
 
 let db, backend;
@@ -157,6 +156,29 @@ CREATE TABLE IF NOT EXISTS wellness_checkins (
   note TEXT,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS user_files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,                 -- cv | credential
+  filename TEXT,
+  mime TEXT,
+  size INTEGER,
+  data TEXT,                          -- base64-encoded file contents
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS coaching_bookings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  coach_key TEXT NOT NULL,            -- wellness | career | professional | interview | financial | study | life
+  coach_label TEXT,
+  amount INTEGER,                     -- ZAR (whole rand)
+  slot_date TEXT,                     -- YYYY-MM-DD
+  slot_time TEXT,                     -- HH:MM
+  note TEXT,
+  reference TEXT,                     -- Paystack reference (if paid)
+  status TEXT NOT NULL DEFAULT 'requested', -- requested | paid | confirmed | cancelled
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER,
@@ -226,6 +248,8 @@ for (const stmt of [
   "ALTER TABLE users ADD COLUMN referral_code TEXT",           // partner's referral code
   "ALTER TABLE companies ADD COLUMN referred_by INTEGER",      // partner user id who referred this company
   "ALTER TABLE payments ADD COLUMN paid_out INTEGER DEFAULT 0",// partner commission settled
+  "ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0", // email confirmed via KTH Mail
+  "ALTER TABLE users ADD COLUMN verify_token TEXT",               // one-time email-verification token
 ]) { try { db.exec(stmt); } catch (e) { /* column exists */ } }
 
 // Persistent session store table (replaces in-memory MemoryStore for production).
