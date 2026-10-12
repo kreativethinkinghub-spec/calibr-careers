@@ -1,5 +1,10 @@
-# CALIBR on Fly.io — Johannesburg region, Turso-backed (no volume needed).
-# Deploy:  cd app  →  fly launch --no-deploy --copy-config --name calibr  →  set secrets (below)  →  fly deploy
+# CALIBR on Fly.io — Johannesburg region. Durable SQLite on a Fly volume (no external DB).
+# The app serves the in-app landing at "/" plus signup/login/jobs/dashboards/pricing/agents.
+# Deploy (from app/):
+#   fly launch --no-deploy --copy-config --name calibr
+#   fly volumes create calibr_data --region jnb --size 1
+#   fly secrets set OPENAI_API_KEY=... PAYSTACK_SECRET_KEY=... PAYSTACK_PUBLIC_KEY=... SESSION_SECRET=...
+#   fly deploy
 app = "calibr"
 primary_region = "jnb"          # Johannesburg — lowest latency for SA users
 
@@ -8,12 +13,19 @@ primary_region = "jnb"          # Johannesburg — lowest latency for SA users
 [env]
   PORT = "8080"
   NODE_ENV = "production"
+  DB_PATH = "/data/calibr.db"   # SQLite file on the mounted volume → survives deploys/restarts
   ADMIN_EMAILS = "kreativethinkinghub@gmail.com"
+
+# Durable storage: node:sqlite writes to /data on this volume (in-region, no Turso needed).
+# A volume is owned by a single machine, so keep exactly one machine running (see min_machines_running).
+[[mounts]]
+  source = "calibr_data"
+  destination = "/data"
 
 [http_service]
   internal_port = 8080
   force_https = true
-  # Keep ONE machine always on: the local Turso replica stays warm and consistent (no cold-start re-sync).
+  # Keep ONE machine always on: it owns the SQLite volume (never scale to 2 without switching to Turso/LiteFS).
   auto_stop_machines = "off"
   auto_start_machines = true
   min_machines_running = 1
